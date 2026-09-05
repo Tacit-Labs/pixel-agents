@@ -661,6 +661,10 @@ export class OfficeState {
     if (!ch || !ch.seatId) return;
     const seat = this.seats.get(ch.seatId);
     if (!seat) return;
+    // An externally commanded move ends the bench (Tacit patch): otherwise a
+    // reactivated-elsewhere or manually-reseated character would still read
+    // as inLounge and the ordinary inactive cycle would never resume for it.
+    ch.inLounge = false;
     const path = this.withOwnSeatUnblocked(ch, () =>
       findPath(ch.tileCol, ch.tileRow, seat.seatCol, seat.seatRow, this.tileMap, this.blockedTiles),
     );
@@ -685,38 +689,51 @@ export class OfficeState {
   /**
    * Bench a character in the lounge once it has been continuously inactive
    * past LOUNGE_IDLE_SEC (Tacit patch). Skips: characters with no lounge
-   * configured, already-benched characters, characters with no seat (nothing
-   * to come back to — sub-agents never have one), and one already standing
+   * configured, already-benched (or already-heading-there) characters,
+   * characters with no seat (nothing to come back to — sub-agents never have
+   * one), a character showing a permission bubble (ch.bubbleType ===
+   * 'permission', durable — set/cleared explicitly by
+   * showPermissionBubble/clearPermissionBubble, never fades on its own — a
+   * director needs to see this one at its desk), and one already standing
    * inside the lounge Area. No free lounge tile (or no path to one) leaves
    * the character exactly where the ordinary inactive wander/seat-rest cycle
    * put it — behaviour is unchanged from today whenever the lounge is unset
    * or full.
    *
-   * Also skips a character a director needs to see at their desk: a
-   * permission bubble (ch.bubbleType === 'permission', durable — set/cleared
-   * explicitly by showPermissionBubble/clearPermissionBubble, never fades on
-   * its own) or one still awaiting the director's own input
-   * (ch.waitingAwaitingInput). The latter, not `bubbleType === 'waiting'`,
-   * is the correct long-lived check: ToolOverlay's own "Waiting for input"
-   * label is "Driven by Character.waitingAwaitingInput", because the waiting
-   * bubble sprite itself clears after WAITING_BUBBLE_DURATION_SEC (2s) — long
-   * since gone by the time LOUNGE_IDLE_SEC (600s) elapses — while
-   * waitingAwaitingInput persists until the next status change.
+   * Deliberately NOT gated on ch.waitingAwaitingInput. That flag is set by
+   * agentStatus{waiting, awaitingInput:true}, which the server derives from
+   * Claude Code's Notification(idle_prompt) — "this REPL has been idle 60
+   * seconds", not "a director was asked something" — and nothing ever clears
+   * it, so every idle session latches it at T+60s and is still latched at
+   * the LOUNGE_IDLE_SEC (600s) threshold: gating on it would silently
+   * exclude every character from ever lounging. A genuine permission prompt
+   * suppresses the idle notification upstream, so bubbleType === 'permission'
+   * alone loses nothing.
    */
   private maybeSendToLounge(ch: Character): void {
     if (!this.loungeArea) return;
     if (ch.inLounge) return;
     if (!ch.seatId) return;
-    if (ch.bubbleType === 'permission' || ch.waitingAwaitingInput) return;
+    if (ch.bubbleType === 'permission') return;
     if (ch.inactiveSec < LOUNGE_IDLE_SEC) return;
     if (this.areaLabelAt(ch.tileCol, ch.tileRow) === this.loungeArea) {
       ch.inLounge = true;
       return;
     }
 
+    // Seed occupancy with every character's current tile, PLUS the final
+    // path step of anyone already benched-or-heading-to-the-lounge this
+    // frame (Tacit patch): a character mid-walk there hasn't arrived yet, so
+    // its destination tile wouldn't otherwise be reserved and a second
+    // character crossing the threshold in the same update() could be pathed
+    // onto the exact same tile and stack on arrival.
     const occupied = new Set<string>();
     for (const other of this.characters.values()) {
       occupied.add(`${other.tileCol},${other.tileRow}`);
+      if (other.inLounge && other.path.length > 0) {
+        const dest = other.path[other.path.length - 1];
+        occupied.add(`${dest.col},${dest.row}`);
+      }
     }
     const target = closestFreeAreaTile(
       this.walkableTiles,
@@ -754,6 +771,8 @@ export class OfficeState {
       findPath(ch.tileCol, ch.tileRow, col, row, this.tileMap, this.blockedTiles),
     );
     if (path.length === 0) return false;
+    // An externally commanded move ends the bench (Tacit patch) — see sendToSeat.
+    ch.inLounge = false;
     ch.path = path;
     ch.moveProgress = 0;
     ch.state = CharacterState.WALK;
@@ -877,8 +896,8 @@ export class OfficeState {
         ch.moveProgress = 0;
       } else if (wasLounged) {
         // Reactivated while benched in the lounge (Tacit patch): send it back
-        // to its own seat rather than leaving it parked there.
-        ch.inLounge = false;
+        // to its own seat rather than leaving it parked there. sendToSeat
+        // itself clears ch.inLounge.
         this.sendToSeat(id);
       }
       this.rebuildFurnitureInstances();
@@ -1179,6 +1198,42 @@ export class OfficeState {
     if (hueShift !== undefined) ch.hueShift = hueShift;
   }
 
+  /**
+   * Per-frame lounge bookkeeping for one character (Tacit patch): ticks the
+   * continuous-inactivity clock, dispatches to the lounge past
+   * LOUNGE_IDLE_SEC, and freezes an already-benched character — skipping the
+   * ordinary inactive wander/seat-rest cycle entirely — until it's
+   * reactivated or commanded elsewhere (both of which clear ch.inLounge).
+   *
+   * Returns true when the character is frozen this frame, having already
+   * ticked its own waiting-bubble timer (frozen characters still need that;
+   * they just skip everything else `updateCharacter` would otherwise do) —
+   * the caller's cue to `continue` past the ordinary FSM tick, keeping
+   * upstream's own `withOwnSeatUnblocked(() => updateCharacter(...))` line
+   * untouched for a merge.
+   */
+  private tickLounge(ch: Character, dt: number): boolean {
+    if (ch.isActive) {
+      ch.inactiveSec = 0;
+    } else {
+      ch.inactiveSec += dt;
+      this.maybeSendToLounge(ch);
+    }
+
+    // Mid-walk toward the lounge tile (state === WALK) must keep animating.
+    const frozen = ch.inLounge && !ch.isActive && ch.state !== CharacterState.WALK;
+    if (!frozen) return false;
+
+    if (ch.bubbleType === 'waiting') {
+      ch.bubbleTimer -= dt;
+      if (ch.bubbleTimer <= 0) {
+        ch.bubbleType = null;
+        ch.bubbleTimer = 0;
+      }
+    }
+    return true;
+  }
+
   update(dt: number): void {
     // Furniture animation cycling
     const prevFrame = Math.floor(this.furnitureAnimTimer / FURNITURE_ANIM_INTERVAL_SEC);
@@ -1202,29 +1257,12 @@ export class OfficeState {
         continue; // skip normal FSM while the effect is (or just was) active
       }
 
-      // Continuous-inactivity clock + lounge dispatch (Tacit patch). Reset the
-      // instant the agent is active; otherwise accumulate and, past the
-      // threshold, bench it in the lounge.
-      if (ch.isActive) {
-        ch.inactiveSec = 0;
-      } else {
-        ch.inactiveSec += dt;
-        this.maybeSendToLounge(ch);
-      }
+      if (this.tickLounge(ch, dt)) continue;
 
-      // A character parked in the lounge stays frozen there — skipping the
-      // ordinary inactive wander/seat-rest cycle entirely — until it either
-      // becomes active (setAgentActive sends it back to its seat) or is still
-      // mid-walk toward the lounge tile (state === WALK), which must keep
-      // animating.
-      if (ch.inLounge && !ch.isActive && ch.state !== CharacterState.WALK) {
-        // Frozen: no FSM tick this frame.
-      } else {
-        // Temporarily unblock own seat so character can pathfind to it
-        this.withOwnSeatUnblocked(ch, () =>
-          updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles),
-        );
-      }
+      // Temporarily unblock own seat so character can pathfind to it
+      this.withOwnSeatUnblocked(ch, () =>
+        updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles),
+      );
 
       // Tick bubble timer for waiting bubbles
       if (ch.bubbleType === 'waiting') {
