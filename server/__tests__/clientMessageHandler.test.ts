@@ -1,8 +1,9 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { AgentRuntime } from '../src/agentRuntime.js';
 import { AgentStateStore } from '../src/agentStateStore.js';
 import {
   type AssetCache,
@@ -11,6 +12,7 @@ import {
 } from '../src/clientMessageHandler.js';
 import { getHooksEnabled, readConfig, setHooksEnabled } from '../src/configPersistence.js';
 import { FileStateAdapter } from '../src/fileStateAdapter.js';
+import { readLayoutFromFile } from '../src/layoutPersistence.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
 import type { AgentState } from '../src/types.js';
 
@@ -62,8 +64,12 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
   let sent: Array<Record<string, unknown>>;
   let ctx: ClientMessageContext;
 
+  // Privileged by default: this suite is exercising the dispatch logic itself
+  // (area mappings, showAreas, hooks status), not the untokened-client gate —
+  // that gate has its own describe block below. Individual tests still flip
+  // ctx.privileged = false where they mean to test the unprivileged path.
   function freshCtx(cache: AssetCache | null = null): ClientMessageContext {
-    return { store, cache };
+    return { store, cache, privileged: true };
   }
 
   beforeEach(() => {
@@ -429,8 +435,10 @@ describe('clientMessageHandler: saveAgentSeats palette sync', () => {
   let sent: Array<Record<string, unknown>>;
   let ctx: ClientMessageContext;
 
+  // Privileged by default: this suite exercises saveAgentSeats' palette/hue
+  // validation, not the untokened-client gate.
   function freshCtx(cache: AssetCache | null = null): ClientMessageContext {
-    return { store, cache };
+    return { store, cache, privileged: true };
   }
 
   beforeEach(() => {
@@ -601,5 +609,151 @@ describe('clientMessageHandler: saveAgentSeats palette sync', () => {
       ctx,
     );
     expect(store.get(1)?.palette).toBe(7);
+  });
+});
+
+// A `--host` bind exposes this socket to every device on the network. The
+// token from the CLI's printed URL (or the embedded Bearer token) is the one
+// thing a LAN peer or a DNS-rebound page cannot reproduce, so everything that
+// mutates state must require it — see the READ_ONLY_CLIENT_MESSAGES comment
+// in clientMessageHandler.ts. setHooksEnabled/hooksConsentResponse have their
+// own dedicated coverage (consentFlow.test.ts, httpServerWs.test.ts) since
+// each already carried a privileged check before this gate existed.
+describe('clientMessageHandler: untokened clients are read-only', () => {
+  let tempHome: string;
+  let originalHome: string | undefined;
+  let store: AgentStateStore;
+  let sent: Array<Record<string, unknown>>;
+  let ctx: ClientMessageContext;
+
+  beforeEach(() => {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-cmh-gate-'));
+    originalHome = process.env.HOME;
+    process.env.HOME = tempHome;
+
+    store = new AgentStateStore();
+    store.setAdapter(new FileStateAdapter({ namespace: 'standalone' }));
+    sent = [];
+    ctx = { store, cache: null };
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    store.dispose();
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  });
+
+  describe('saveLayout', () => {
+    it('an untokened client does not write the layout file, and warns once', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      ctx.privileged = false;
+
+      handleClientMessage(
+        { type: 'saveLayout', layout: { rooms: ['office'] } },
+        (m) => sent.push(m),
+        ctx,
+      );
+
+      expect(readLayoutFromFile()).toBeNull();
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('saveLayout');
+    });
+
+    it('a tokened (privileged) client writes the layout file as before', () => {
+      ctx.privileged = true;
+
+      handleClientMessage(
+        { type: 'saveLayout', layout: { rooms: ['office'] } },
+        (m) => sent.push(m),
+        ctx,
+      );
+
+      expect(readLayoutFromFile()).toEqual({ rooms: ['office'] });
+    });
+  });
+
+  describe('setWatchAllSessions', () => {
+    it('an untokened client leaves the runtime ref and the adapter setting unset', () => {
+      const runtime = { watchAllSessions: { current: false } } as unknown as AgentRuntime;
+      ctx.runtime = runtime;
+      ctx.privileged = false;
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      handleClientMessage({ type: 'setWatchAllSessions', enabled: true }, (m) => sent.push(m), ctx);
+
+      expect(runtime.watchAllSessions.current).toBe(false);
+      expect(store.getAdapter()!.getSetting('pixel-agents.watchAllSessions', false)).toBe(false);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('setWatchAllSessions');
+    });
+
+    it('a tokened (privileged) client updates the runtime ref and the adapter setting', () => {
+      const runtime = { watchAllSessions: { current: false } } as unknown as AgentRuntime;
+      ctx.runtime = runtime;
+      ctx.privileged = true;
+
+      handleClientMessage({ type: 'setWatchAllSessions', enabled: true }, (m) => sent.push(m), ctx);
+
+      expect(runtime.watchAllSessions.current).toBe(true);
+      expect(store.getAdapter()!.getSetting('pixel-agents.watchAllSessions', false)).toBe(true);
+    });
+  });
+
+  describe('addExternalAssetDirectory', () => {
+    it('an untokened client does not write config or reload assets', () => {
+      let reloadCalled = false;
+      ctx.onReloadAssets = () => {
+        reloadCalled = true;
+      };
+      ctx.privileged = false;
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const before = readConfig();
+
+      handleClientMessage(
+        { type: 'addExternalAssetDirectory', path: '/tmp/some-assets' },
+        (m) => sent.push(m),
+        ctx,
+      );
+
+      expect(readConfig()).toEqual(before);
+      expect(reloadCalled).toBe(false);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0][0]).toContain('addExternalAssetDirectory');
+    });
+
+    it('a tokened (privileged) client writes config and reloads assets as before', () => {
+      let reloadCalled = false;
+      ctx.onReloadAssets = () => {
+        reloadCalled = true;
+      };
+      ctx.privileged = true;
+
+      handleClientMessage(
+        { type: 'addExternalAssetDirectory', path: '/tmp/some-assets' },
+        (m) => sent.push(m),
+        ctx,
+      );
+
+      expect(readConfig().externalAssetDirectories).toContain('/tmp/some-assets');
+      expect(reloadCalled).toBe(true);
+    });
+  });
+
+  // webviewReady is the handshake itself — it must keep working with no
+  // token at all, or a LAN spectator could never watch the office either.
+  // handleWebviewReady's own behavior (ordering, cache wiring, etc.) is
+  // covered above; this only pins that the new gate does not touch it.
+  it('webviewReady still works for an untokened client', () => {
+    ctx.privileged = false;
+
+    handleClientMessage({ type: 'webviewReady' }, (m) => sent.push(m), ctx);
+
+    expect(sent.some((m) => m.type === 'existingAgents')).toBe(true);
+    expect(sent.some((m) => m.type === 'settingsLoaded')).toBe(true);
   });
 });
