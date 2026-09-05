@@ -190,8 +190,6 @@ export function readConfig(): PixelAgentsConfig {
         externalAssetDirectories: [],
         hooksConsent: {},
         hooksEnabled: {},
-        ownerPalettes: {},
-        loungeArea: undefined,
       };
     }
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -215,8 +213,6 @@ export function readConfig(): PixelAgentsConfig {
       externalAssetDirectories: [],
       hooksConsent: {},
       hooksEnabled: {},
-      ownerPalettes: {},
-      loungeArea: undefined,
     };
   }
 }
