@@ -76,3 +76,41 @@ describe('AgentRuntime -- D5 foreign-session gate', () => {
     expect(store.size).toBe(1);
   });
 });
+
+describe('AgentRuntime -- hooksEnabled off still processes hook events', () => {
+  let runtime: AgentRuntime;
+  let store: AgentStateStore;
+
+  afterEach(() => {
+    runtime?.dispose();
+  });
+
+  it('adopts and shows tool activity from hook POSTs when hooksEnabled is false', () => {
+    store = new AgentStateStore();
+    const messages: Array<Record<string, unknown>> = [];
+    store.on('broadcast', (m) => messages.push(m));
+    runtime = new AgentRuntime(store, claudeProvider);
+    runtime.watchAllSessions.current = true;
+    runtime.hooksEnabled.current = false;
+    const cwd = path.join(os.tmpdir(), `pxl-hooksoff-${crypto.randomUUID()}`);
+
+    runtime.handleHookEvent('claude', {
+      hook_event_name: 'SessionStart',
+      session_id: 'hooks-off-1',
+      source: 'startup',
+      cwd,
+    });
+    runtime.handleHookEvent('claude', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'hooks-off-1',
+      tool_name: 'Edit',
+      tool_input: { file_path: '/tmp/x.ts' },
+    });
+
+    expect(store.size).toBe(1);
+    const agent = [...store.values()][0];
+    expect(agent.hookDelivered).toBe(true);
+    expect(messages.some((m) => m.type === 'agentToolStart' && m.toolName === 'Edit')).toBe(true);
+    expect(agent.currentHookToolId).toBeDefined();
+  });
+});
