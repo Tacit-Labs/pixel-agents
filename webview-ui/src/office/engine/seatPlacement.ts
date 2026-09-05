@@ -54,3 +54,36 @@ export function closestFreeSeat(
   }
   return best;
 }
+
+/**
+ * Free walkable tile (not occupied by any character) whose Area label equals
+ * `label`, closest (Manhattan) to (fromCol, fromRow). Used to bench an idle
+ * character in the lounge Area (Tacit patch). `areaTiles` is the layout's
+ * flat per-tile label array, indexed `row * cols + col`; returns null when
+ * there's no such tile (no `areaTiles`, no tile carries `label`, or every one
+ * is occupied) — the caller's fallback is to leave the character where it is.
+ */
+export function closestFreeAreaTile(
+  walkableTiles: ReadonlyArray<{ col: number; row: number }>,
+  areaTiles: ReadonlyArray<string | null> | undefined,
+  cols: number,
+  label: string,
+  occupied: ReadonlySet<string>,
+  fromCol: number,
+  fromRow: number,
+): { col: number; row: number } | null {
+  if (!areaTiles || areaTiles.length === 0) return null;
+  let best: { col: number; row: number } | null = null;
+  let bestDist = Infinity;
+  for (const tile of walkableTiles) {
+    const idx = tile.row * cols + tile.col;
+    if (areaTiles[idx] !== label) continue;
+    if (occupied.has(`${tile.col},${tile.row}`)) continue;
+    const d = Math.abs(tile.col - fromCol) + Math.abs(tile.row - fromRow);
+    if (d < bestDist) {
+      best = tile;
+      bestDist = d;
+    }
+  }
+  return best;
+}

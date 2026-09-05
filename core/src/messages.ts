@@ -306,6 +306,9 @@ export interface ExternalAssetDirectoriesUpdated {
 export interface AreaMappingsLoaded {
   type: 'areaMappingsLoaded';
   mappings: Record<string, string[]>;
+  /** Area label the office benches idle agents to (Tacit patch), or null when
+   *  unconfigured. Optional for forward-compat with a server that predates it. */
+  loungeArea?: string | null;
 }
 
 export interface WorkspaceFolders {

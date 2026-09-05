@@ -767,6 +767,11 @@ components:
             type: array
             items:
               type: string
+        loungeArea:
+          type: [string, 'null']
+          description: >-
+            Area label the office benches idle agents to (Tacit patch), or null
+            when unconfigured (config.loungeArea).
 
     ExternalAssetDirectoriesUpdated:
       description: External asset directory list changed (after add/remove).

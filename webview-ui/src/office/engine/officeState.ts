@@ -11,6 +11,7 @@ import {
   GREETER_TILE_MARGIN,
   INACTIVE_SEAT_TIMER_MIN_SEC,
   INACTIVE_SEAT_TIMER_RANGE_SEC,
+  LOUNGE_IDLE_SEC,
   MAX_PET_ID_LENGTH,
   PET_HIT_HALF_WIDTH,
   PET_HIT_HEIGHT,
@@ -41,7 +42,7 @@ import { CharacterState, Direction, PetState, TILE_SIZE } from '../types.js';
 import { createCharacter, updateCharacter } from './characters.js';
 import { advanceMatrixEffect, startMatrixEffect } from './matrixEffectState.js';
 import { createPet, updatePet } from './petEntity.js';
-import { anchorTile, closestFreeSeat } from './seatPlacement.js';
+import { anchorTile, closestFreeAreaTile, closestFreeSeat } from './seatPlacement.js';
 
 /** Internal helper: facing-tile coords for a seat. Returns null for invalid direction. */
 function seatFacingOffset(direction: Direction): { dCol: number; dRow: number } {
@@ -80,6 +81,13 @@ export class OfficeState {
   areaMappings: Record<string, string[]> = {};
 
   /**
+   * Area label the office benches idle characters to, or null when unset
+   * (Tacit patch). Populated by useExtensionMessages on `areaMappingsLoaded`,
+   * the same message as areaMappings. Consulted by `maybeSendToLounge()`.
+   */
+  loungeArea: string | null = null;
+
+  /**
    * The first-run consent greeter, deliberately NOT in `characters`.
    *
    * `characters` means "agents": everything that iterates it — seat
@@ -103,6 +111,10 @@ export class OfficeState {
 
   setAreaMappings(mappings: Record<string, string[]>): void {
     this.areaMappings = mappings;
+  }
+
+  setLoungeArea(area: string | null): void {
+    this.loungeArea = area;
   }
 
   constructor(layout?: OfficeLayout) {
@@ -282,16 +294,21 @@ export class OfficeState {
     return out;
   }
 
+  /** Area label assigned to a tile, or null (no areaTiles, or an unzoned tile). */
+  private areaLabelAt(col: number, row: number): string | null {
+    const tiles = this.layout.areaTiles;
+    if (!tiles || tiles.length === 0) return null;
+    const idx = row * this.layout.cols + col;
+    if (idx < 0 || idx >= tiles.length) return null;
+    return tiles[idx] ?? null;
+  }
+
   /** Find the area label assigned to a seat's tile, or null. Public for e2e
    *  observability (getAgentSeats hook reads a seated agent's area). */
   seatZone(uid: string): string | null {
     const seat = this.seats.get(uid);
     if (!seat) return null;
-    const tiles = this.layout.areaTiles;
-    if (!tiles || tiles.length === 0) return null;
-    const idx = seat.seatRow * this.layout.cols + seat.seatCol;
-    if (idx < 0 || idx >= tiles.length) return null;
-    return tiles[idx] ?? null;
+    return this.areaLabelAt(seat.seatCol, seat.seatRow);
   }
 
   /**
@@ -665,6 +682,65 @@ export class OfficeState {
     }
   }
 
+  /**
+   * Bench a character in the lounge once it has been continuously inactive
+   * past LOUNGE_IDLE_SEC (Tacit patch). Skips: characters with no lounge
+   * configured, already-benched characters, characters with no seat (nothing
+   * to come back to — sub-agents never have one), and one already standing
+   * inside the lounge Area. No free lounge tile (or no path to one) leaves
+   * the character exactly where the ordinary inactive wander/seat-rest cycle
+   * put it — behaviour is unchanged from today whenever the lounge is unset
+   * or full.
+   *
+   * Also skips a character a director needs to see at their desk: a
+   * permission bubble (ch.bubbleType === 'permission', durable — set/cleared
+   * explicitly by showPermissionBubble/clearPermissionBubble, never fades on
+   * its own) or one still awaiting the director's own input
+   * (ch.waitingAwaitingInput). The latter, not `bubbleType === 'waiting'`,
+   * is the correct long-lived check: ToolOverlay's own "Waiting for input"
+   * label is "Driven by Character.waitingAwaitingInput", because the waiting
+   * bubble sprite itself clears after WAITING_BUBBLE_DURATION_SEC (2s) — long
+   * since gone by the time LOUNGE_IDLE_SEC (600s) elapses — while
+   * waitingAwaitingInput persists until the next status change.
+   */
+  private maybeSendToLounge(ch: Character): void {
+    if (!this.loungeArea) return;
+    if (ch.inLounge) return;
+    if (!ch.seatId) return;
+    if (ch.bubbleType === 'permission' || ch.waitingAwaitingInput) return;
+    if (ch.inactiveSec < LOUNGE_IDLE_SEC) return;
+    if (this.areaLabelAt(ch.tileCol, ch.tileRow) === this.loungeArea) {
+      ch.inLounge = true;
+      return;
+    }
+
+    const occupied = new Set<string>();
+    for (const other of this.characters.values()) {
+      occupied.add(`${other.tileCol},${other.tileRow}`);
+    }
+    const target = closestFreeAreaTile(
+      this.walkableTiles,
+      this.layout.areaTiles,
+      this.layout.cols,
+      this.loungeArea,
+      occupied,
+      ch.tileCol,
+      ch.tileRow,
+    );
+    if (!target) return;
+
+    const path = this.withOwnSeatUnblocked(ch, () =>
+      findPath(ch.tileCol, ch.tileRow, target.col, target.row, this.tileMap, this.blockedTiles),
+    );
+    ch.inLounge = true;
+    if (path.length === 0) return; // already there, or unreachable — treat as arrived
+    ch.path = path;
+    ch.moveProgress = 0;
+    ch.state = CharacterState.WALK;
+    ch.frame = 0;
+    ch.frameTimer = 0;
+  }
+
   /** Walk an agent to an arbitrary walkable tile (right-click command) */
   walkToTile(agentId: number, col: number, row: number): boolean {
     const ch = this.characters.get(agentId);
@@ -791,6 +867,7 @@ export class OfficeState {
   setAgentActive(id: number, active: boolean): void {
     const ch = this.characters.get(id);
     if (ch) {
+      const wasLounged = ch.inLounge;
       ch.isActive = active;
       if (!active) {
         // Sentinel -1: signals turn just ended, skip next seat rest timer.
@@ -798,6 +875,11 @@ export class OfficeState {
         ch.seatTimer = -1;
         ch.path = [];
         ch.moveProgress = 0;
+      } else if (wasLounged) {
+        // Reactivated while benched in the lounge (Tacit patch): send it back
+        // to its own seat rather than leaving it parked there.
+        ch.inLounge = false;
+        this.sendToSeat(id);
       }
       this.rebuildFurnitureInstances();
     }
@@ -1120,10 +1202,29 @@ export class OfficeState {
         continue; // skip normal FSM while the effect is (or just was) active
       }
 
-      // Temporarily unblock own seat so character can pathfind to it
-      this.withOwnSeatUnblocked(ch, () =>
-        updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles),
-      );
+      // Continuous-inactivity clock + lounge dispatch (Tacit patch). Reset the
+      // instant the agent is active; otherwise accumulate and, past the
+      // threshold, bench it in the lounge.
+      if (ch.isActive) {
+        ch.inactiveSec = 0;
+      } else {
+        ch.inactiveSec += dt;
+        this.maybeSendToLounge(ch);
+      }
+
+      // A character parked in the lounge stays frozen there — skipping the
+      // ordinary inactive wander/seat-rest cycle entirely — until it either
+      // becomes active (setAgentActive sends it back to its seat) or is still
+      // mid-walk toward the lounge tile (state === WALK), which must keep
+      // animating.
+      if (ch.inLounge && !ch.isActive && ch.state !== CharacterState.WALK) {
+        // Frozen: no FSM tick this frame.
+      } else {
+        // Temporarily unblock own seat so character can pathfind to it
+        this.withOwnSeatUnblocked(ch, () =>
+          updateCharacter(ch, dt, this.walkableTiles, this.seats, this.tileMap, this.blockedTiles),
+        );
+      }
 
       // Tick bubble timer for waiting bubbles
       if (ch.bubbleType === 'waiting') {
