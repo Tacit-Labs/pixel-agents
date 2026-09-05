@@ -302,7 +302,7 @@ export function renderAreaLabels(
  * greeter included, since it renders like one), keyed off each character's
  * live tile position. Pure and cheap — a handful of characters — so it's
  * rebuilt every frame rather than cached. Exported for direct unit testing;
- * consumed by renderFrame to dim empty-Area tiles in renderTileGrid.
+ * consumed by renderFrame to feed renderEmptyAreaDim.
  */
 export function occupiedAreaLabels(
   characters: Character[],
@@ -319,31 +319,40 @@ export function occupiedAreaLabels(
 }
 
 /**
- * Draw a translucent black overlay over (r, c) when it belongs to an Area
- * that holds no character right now — the lounge Area and unzoned tiles
- * (label null) are never dimmed. Called from renderTileGrid for both the
- * wall/fallback branch and the floor-sprite branch, after the base tile is
- * drawn, so furniture and characters (drawn separately in renderScene) are
- * never touched.
+ * Dim the floor/wall tiles of any Area holding no character right now (Tacit
+ * patch) — the lounge Area and unzoned tiles (label null) are never dimmed.
+ * A standalone pass, not folded into renderTileGrid's per-tile loop: it must
+ * run AFTER renderCarpetLayer, or a carpeted room (which is exactly where
+ * per-repo Areas get used) would never read as dim regardless of occupancy.
+ * One save/restore for the whole pass, not per tile.
+ *
+ * @internal
  */
-function dimTileIfEmptyArea(
+export function renderEmptyAreaDim(
   ctx: CanvasRenderingContext2D,
-  areaTiles: Array<string | null>,
-  layoutCols: number,
-  r: number,
-  c: number,
-  occupiedAreas: Set<string> | undefined,
+  areaTiles: Array<string | null> | undefined,
+  cols: number,
+  rows: number,
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+  occupiedAreas: Set<string>,
   loungeArea: string | null | undefined,
-  rect: { offsetX: number; offsetY: number; s: number },
 ): void {
-  const label = areaTiles[r * layoutCols + c];
-  if (!label) return; // unzoned — never dimmed
-  if (label === loungeArea) return; // the lounge itself — never dimmed
-  if (occupiedAreas?.has(label)) return; // someone's here — not empty
+  if (!areaTiles || areaTiles.length === 0) return;
+  const s = TILE_SIZE * zoom;
   ctx.save();
   ctx.globalAlpha = EMPTY_AREA_DIM_ALPHA;
   ctx.fillStyle = EMPTY_AREA_DIM_COLOR;
-  ctx.fillRect(rect.offsetX + c * rect.s, rect.offsetY + r * rect.s, rect.s, rect.s);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const label = areaTiles[r * cols + c];
+      if (!label) continue; // unzoned — never dimmed
+      if (label === loungeArea) continue; // the lounge itself — never dimmed
+      if (occupiedAreas.has(label)) continue; // someone's here — not empty
+      ctx.fillRect(offsetX + c * s, offsetY + r * s, s, s);
+    }
+  }
   ctx.restore();
 }
 
@@ -356,16 +365,12 @@ export function renderTileGrid(
   zoom: number,
   tileColors?: Array<ColorValue | null>,
   cols?: number,
-  areaTiles?: Array<string | null>,
-  occupiedAreas?: Set<string>,
-  loungeArea?: string | null,
 ): void {
   const s = TILE_SIZE * zoom;
   const useSpriteFloors = hasFloorSprites();
   const tmRows = tileMap.length;
   const tmCols = tmRows > 0 ? tileMap[0].length : 0;
   const layoutCols = cols ?? tmCols;
-  const dimEmptyAreas = areaTiles !== undefined && areaTiles.length > 0;
 
   // Floor tiles + wall base color
   for (let r = 0; r < tmRows; r++) {
@@ -385,13 +390,6 @@ export function renderTileGrid(
           ctx.fillStyle = FALLBACK_FLOOR_COLOR;
         }
         ctx.fillRect(offsetX + c * s, offsetY + r * s, s, s);
-        if (dimEmptyAreas) {
-          dimTileIfEmptyArea(ctx, areaTiles, layoutCols, r, c, occupiedAreas, loungeArea, {
-            offsetX,
-            offsetY,
-            s,
-          });
-        }
         continue;
       }
 
@@ -401,13 +399,6 @@ export function renderTileGrid(
       const sprite = getColorizedFloorSprite(tile, color);
       const cached = getCachedSprite(sprite, zoom);
       ctx.drawImage(cached, offsetX + c * s, offsetY + r * s);
-      if (dimEmptyAreas) {
-        dimTileIfEmptyArea(ctx, areaTiles, layoutCols, r, c, occupiedAreas, loungeArea, {
-          offsetX,
-          offsetY,
-          s,
-        });
-      }
     }
   }
 }
@@ -986,26 +977,18 @@ export function renderFrame(
   // the DOM overlays so a label lands exactly on the sprite it belongs to.
   const { offsetX, offsetY } = mapOffset(canvasWidth, canvasHeight, cols, rows, zoom, panX, panY);
 
-  // Draw tiles (floor + wall base color) — dimming any Area with no character
-  // in it right now (never the lounge, never unzoned tiles).
-  const occupiedAreas = occupiedAreaLabels(characters, areaTiles, cols);
-  renderTileGrid(
-    ctx,
-    tileMap,
-    offsetX,
-    offsetY,
-    zoom,
-    tileColors,
-    layoutCols,
-    areaTiles,
-    occupiedAreas,
-    loungeArea,
-  );
+  // Draw tiles (floor + wall base color)
+  renderTileGrid(ctx, tileMap, offsetX, offsetY, zoom, tileColors, layoutCols);
 
   // Carpet layer (above floor, below seat indicators / furniture / characters)
   if (carpetTiles && carpetTiles.length > 0) {
     renderCarpetLayer(ctx, carpetTiles, cols, rows, offsetX, offsetY, zoom);
   }
+
+  // Dim any Area with no character in it right now (never the lounge, never
+  // unzoned tiles). Its own pass, after carpets, so a carpeted room dims too.
+  const occupiedAreas = occupiedAreaLabels(characters, areaTiles, cols);
+  renderEmptyAreaDim(ctx, areaTiles, cols, rows, offsetX, offsetY, zoom, occupiedAreas, loungeArea);
 
   // Area overlay (translucent color wash) — above carpets, below seat indicators
   if (showAreas) {
