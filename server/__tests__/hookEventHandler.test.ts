@@ -916,4 +916,23 @@ describe('HookEventHandler', () => {
     handler.handleEvent('claude', { hook_event_name: 'Stop', session_id: 'sess-nolbl' });
     expect(agent.agentName).toBe('kept');
   });
+
+  it('leaves a teammate role name alone: agentName carries the team role, not the operator label', () => {
+    const agent = createTestAgent({
+      id: 4,
+      teamName: 'alpha',
+      leadAgentId: 9,
+      agentName: 'reviewer',
+    });
+    agents.set(4, agent);
+    handler.registerAgent('sess-team', 4);
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'sess-team',
+      tacit_director: 'chris',
+      tacit_role: 'director',
+    });
+    expect(agent.agentName).toBe('reviewer');
+    expect(mockWebview.messages.filter((m) => m.type === 'agentTeamInfo')).toHaveLength(0);
+  });
 });

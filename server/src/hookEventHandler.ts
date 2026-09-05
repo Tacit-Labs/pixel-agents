@@ -104,6 +104,13 @@ export class HookEventHandler {
    *  resolves late (director -> engineer once the job record carries the
    *  session id) re-labels once and a steady stream of events costs nothing. */
   private applyLabel(agentId: number, agent: AgentState, label: AgentLabel): void {
+    // Team-shaped agents use agentName as their team role name (e.g.
+    // 'reviewer'), and a lead relies on it staying empty for lead detection.
+    // Overwriting it with the operator label breaks teammate matching in
+    // handleTeammateIdle/linkTeammates and gets the agent deleted on the next
+    // scanTeamConfigsForRemovals sweep (agentName no longer matches a
+    // configured team member).
+    if (agent.teamName || agent.leadAgentId !== undefined) return;
     const name = formatAgentLabel(label);
     if (agent.agentName === name) return;
     agent.agentName = name;
