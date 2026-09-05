@@ -235,6 +235,42 @@ describe('claudeProvider', () => {
         }),
       ).toBeNull();
     });
+
+    it('carries tacit_* fields through as a label', () => {
+      // 'kuji#412' is an issue-tracker job id, not a color literal — disable
+      // the centralized-color rule just for this fixture string.
+      /* eslint-disable pixel-agents/no-inline-colors */
+      const result = claudeProvider.normalizeHookEvent({
+        hook_event_name: 'PreToolUse',
+        session_id: 'sess-l',
+        tool_name: 'Read',
+        tool_input: {},
+        tacit_director: 'chris',
+        tacit_role: 'engineer',
+        tacit_job: 'kuji#412',
+      });
+      expect(result?.label).toEqual({ owner: 'chris', role: 'engineer', job: 'kuji#412' });
+      /* eslint-enable pixel-agents/no-inline-colors */
+    });
+
+    it('omits the label when tacit_director is absent', () => {
+      const result = claudeProvider.normalizeHookEvent({
+        hook_event_name: 'Stop',
+        session_id: 'sess-l',
+      });
+      expect(result?.label).toBeUndefined();
+    });
+
+    it('drops an empty tacit_job rather than carrying an empty string', () => {
+      const result = claudeProvider.normalizeHookEvent({
+        hook_event_name: 'Stop',
+        session_id: 'sess-l',
+        tacit_director: 'joe',
+        tacit_role: 'director',
+        tacit_job: '',
+      });
+      expect(result?.label).toEqual({ owner: 'joe', role: 'director' });
+    });
   });
 
   describe('formatToolStatus', () => {

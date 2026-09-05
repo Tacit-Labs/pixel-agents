@@ -72,6 +72,28 @@ const KEY_HOOKS_INFO_SHOWN = 'pixel-agents.hooksInfoShown';
 const KEY_SHOW_AREAS = 'pixel-agents.showAreas';
 
 /**
+ * Message types an untokened client may still send. `--host` binds the SPA
+ * (and this socket) to a whole network, and `ctx.privileged` — set from
+ * `standaloneTokenValid` in httpServer.ts — is the only signal a forwarder on
+ * that network cannot reproduce: it never saw the tokened URL the CLI printed.
+ * Everything that mutates state on disk or in the running office (layout,
+ * seats, settings, external asset directories, closing an agent) must require
+ * it. These two are read-only, so they're exempt outright.
+ */
+const READ_ONLY_CLIENT_MESSAGES = new Set(['webviewReady', 'requestDiagnostics']);
+
+/**
+ * `setHooksEnabled` and `hooksConsentResponse` are NOT read-only — either can
+ * grant durable consent to modify `~/.claude/settings.json` — but each already
+ * carries its own `ctx.privileged` check further down in the switch, and each
+ * answers an unprivileged caller with the true installed state rather than
+ * silently doing nothing. Gating them again here would just as well block
+ * them, but earlier and without that truthful reply, so they're exempted from
+ * the blanket gate and left to their own case.
+ */
+const SELF_GATED_CLIENT_MESSAGES = new Set(['setHooksEnabled', 'hooksConsentResponse']);
+
+/**
  * Handle incoming ClientMessage from a WebSocket client.
  *
  * In standalone mode, the server is the authority for all state: assets,
@@ -85,6 +107,18 @@ export function handleClientMessage(
 ): void {
   const { store, runtime, cache } = ctx;
   const adapter = store.getAdapter();
+
+  const type = msg.type as string;
+  if (
+    ctx.privileged !== true &&
+    !READ_ONLY_CLIENT_MESSAGES.has(type) &&
+    !SELF_GATED_CLIENT_MESSAGES.has(type)
+  ) {
+    console.warn(
+      `[Pixel Agents] Ignoring ${type} from an untokened client — changing the office needs the tokened URL the CLI printed.`,
+    );
+    return;
+  }
 
   switch (msg.type) {
     case 'webviewReady':

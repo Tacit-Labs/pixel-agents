@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { normalizeProjectPath } from '../../../../../core/src/normalizeProjectPath.js';
-import type { AgentEvent, HookProvider } from '../../../../../core/src/provider.js';
+import type { AgentEvent, AgentLabel, HookProvider } from '../../../../../core/src/provider.js';
 import {
   BASH_COMMAND_DISPLAY_MAX_LENGTH,
   TASK_DESCRIPTION_DISPLAY_MAX_LENGTH,
@@ -126,7 +126,19 @@ function getAllSessionRoots(): string[] {
 // currentHookToolId state. Synthetic hook-* ids are returned for PreToolUse because
 // the real tool id arrives later via JSONL polling.
 
-function normalizeHookEvent(
+/** Tacit Labs wrapper fields. `tacit_director` is the gate: without it there
+ *  is no label. `tacit_job` is dropped when empty so callers can test for
+ *  presence rather than emptiness. */
+function readLabel(raw: Record<string, unknown>): AgentLabel | undefined {
+  const owner = raw.tacit_director;
+  if (typeof owner !== 'string' || owner === '') return undefined;
+  const role =
+    typeof raw.tacit_role === 'string' && raw.tacit_role !== '' ? raw.tacit_role : 'director';
+  const job = typeof raw.tacit_job === 'string' && raw.tacit_job !== '' ? raw.tacit_job : undefined;
+  return job ? { owner, role, job } : { owner, role };
+}
+
+function normalizeHookEventBody(
   raw: Record<string, unknown>,
 ): { sessionId: string; event: AgentEvent } | null {
   const eventName = raw.hook_event_name;
@@ -245,6 +257,15 @@ function normalizeHookEvent(
     default:
       return null;
   }
+}
+
+function normalizeHookEvent(
+  raw: Record<string, unknown>,
+): { sessionId: string; event: AgentEvent; label?: AgentLabel } | null {
+  const normalized = normalizeHookEventBody(raw);
+  if (!normalized) return null;
+  const label = readLabel(raw);
+  return label ? { ...normalized, label } : normalized;
 }
 
 // ── Installer wrappers: adapt sync signatures to async interface ──
