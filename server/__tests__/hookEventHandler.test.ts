@@ -857,4 +857,63 @@ describe('HookEventHandler', () => {
       }
     });
   });
+
+  // ── Labels ──────────────────────────────────────────────────
+
+  it('sets agentName from a label and broadcasts agentTeamInfo once', () => {
+    // 'kuji#412' is an issue-tracker job id, not a color literal — disable
+    // the centralized-color rule just for this fixture string.
+    /* eslint-disable pixel-agents/no-inline-colors */
+    const agent = createTestAgent({ id: 1 });
+    agents.set(1, agent);
+    handler.registerAgent('sess-lbl', 1);
+
+    const ev = {
+      hook_event_name: 'Stop',
+      session_id: 'sess-lbl',
+      tacit_director: 'chris',
+      tacit_role: 'engineer',
+      tacit_job: 'kuji#412',
+    };
+    handler.handleEvent('claude', ev);
+    handler.handleEvent('claude', ev);
+
+    expect(agent.agentName).toBe('chris · engineer · kuji#412');
+    const infos = mockWebview.messages.filter((m) => m.type === 'agentTeamInfo');
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toMatchObject({ id: 1, agentName: 'chris · engineer · kuji#412' });
+    /* eslint-enable pixel-agents/no-inline-colors */
+  });
+
+  it('re-labels when the role changes from director to engineer', () => {
+    const agent = createTestAgent({ id: 2 });
+    agents.set(2, agent);
+    handler.registerAgent('sess-role', 2);
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'sess-role',
+      tacit_director: 'joe',
+      tacit_role: 'director',
+    });
+    expect(agent.agentName).toBe('joe · director');
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'sess-role',
+      tacit_director: 'joe',
+      tacit_role: 'engineer',
+      tacit_job: 'sip#77',
+    });
+    expect(agent.agentName).toBe('joe · engineer · sip#77');
+    expect(mockWebview.messages.filter((m) => m.type === 'agentTeamInfo')).toHaveLength(2);
+  });
+
+  it('leaves agentName alone when the event has no label', () => {
+    const agent = createTestAgent({ id: 3, agentName: 'kept' });
+    agents.set(3, agent);
+    handler.registerAgent('sess-nolbl', 3);
+    handler.handleEvent('claude', { hook_event_name: 'Stop', session_id: 'sess-nolbl' });
+    expect(agent.agentName).toBe('kept');
+  });
 });

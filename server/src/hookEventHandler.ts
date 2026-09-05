@@ -1,6 +1,6 @@
 import * as path from 'path';
 
-import type { AgentEvent, HookProvider } from '../../core/src/provider.js';
+import type { AgentEvent, AgentLabel, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
 import type { SessionRouter } from './sessionRouter.js';
@@ -56,6 +56,14 @@ interface SessionLifecycleCallbacks {
   onTeammateRemoved?: (teammateAgentId: number) => void;
 }
 
+/** `<owner> · <role>` or `<owner> · <role> · <job>`. Exported for the tests
+ *  and for anything that wants to match what the office shows. */
+export function formatAgentLabel(label: AgentLabel): string {
+  return label.job
+    ? `${label.owner} · ${label.role} · ${label.job}`
+    : `${label.owner} · ${label.role}`;
+}
+
 export class HookEventHandler {
   private lifecycleCallbacks: SessionLifecycleCallbacks = {};
 
@@ -89,6 +97,26 @@ export class HookEventHandler {
       ]);
     }
     return this.provider.subagentToolNames;
+  }
+
+  /** Show an operator-supplied label as the avatar's name. Idempotent: the
+   *  broadcast fires only when the rendered name changes, so a role that
+   *  resolves late (director -> engineer once the job record carries the
+   *  session id) re-labels once and a steady stream of events costs nothing. */
+  private applyLabel(agentId: number, agent: AgentState, label: AgentLabel): void {
+    const name = formatAgentLabel(label);
+    if (agent.agentName === name) return;
+    agent.agentName = name;
+    this.agents.broadcast({
+      type: 'agentTeamInfo',
+      id: agentId,
+      teamName: agent.teamName,
+      agentName: name,
+      isTeamLead: agent.isTeamLead,
+      leadAgentId: agent.leadAgentId,
+      teamUsesTmux: agent.teamUsesTmux,
+    });
+    this.agents.persist();
   }
 
   /** Check if a session is tracked (in workspace project dir, or Watch All Sessions ON). */
@@ -316,6 +344,7 @@ export class HookEventHandler {
     if (!agent) return;
 
     agent.hookDelivered = true;
+    if (normalized.label) this.applyLabel(agentId, agent, normalized.label);
     if (debug)
       console.log(
         `[Pixel Agents] Hook: Agent ${agentId} - ${eventName} (session=${event.session_id.slice(0, 8)}...)`,

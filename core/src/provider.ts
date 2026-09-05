@@ -62,6 +62,15 @@ export type AgentEvent =
     }
   | { kind: 'sessionEnd'; reason?: string };
 
+/** Who a session belongs to and what it is doing there, supplied by the
+ *  operator's own hook wrapper rather than by the CLI. Optional on every
+ *  event; the handler shows it as the avatar's name. */
+export interface AgentLabel {
+  owner: string;
+  role: string;
+  job?: string;
+}
+
 // ── Hook-based Provider (CLIs with hooks APIs) ────────────────
 
 export interface HookProvider {
@@ -80,6 +89,8 @@ export interface HookProvider {
   normalizeHookEvent(raw: Record<string, unknown>): {
     sessionId: string;
     event: AgentEvent;
+    /** Present when the payload carried operator-supplied identity fields. */
+    label?: AgentLabel;
   } | null;
 
   /** Install hook scripts that POST to our server. */
