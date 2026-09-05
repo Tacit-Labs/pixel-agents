@@ -36,4 +36,21 @@ describe('folderNameFromProjectDir', () => {
     expect(folderNameFromProjectDir('')).toBe('');
     expect(folderNameFromProjectDir('---')).toBe('---');
   });
+
+  // Pins CURRENT behavior for a hyphenated repo name -- this is a known
+  // limitation (the last-hyphen-segment rule can't tell "horizon-suite" is
+  // one repo name), not something this test asserts is correct. A merged PR
+  // that changes it should update these two cases deliberately, not by
+  // accident.
+  it('takes only the last segment for a hyphenated repo name (pins existing behavior, not a fix)', () => {
+    expect(folderNameFromProjectDir('-Users-chris-projects-horizon-suite')).toBe('suite');
+  });
+
+  it('the same hyphenated-repo limitation applies after cutting the worktree marker', () => {
+    expect(
+      folderNameFromProjectDir(
+        '-Users-chris-projects-horizon-suite--claude-worktrees-engineer-issue-1',
+      ),
+    ).toBe('suite');
+  });
 });

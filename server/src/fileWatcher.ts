@@ -1115,7 +1115,9 @@ export function adoptExternalSessionFromHook(
   } else {
     // Hooks-only provider (OpenCode, Copilot): no transcript file, all state from hooks
     const id = nextAgentIdRef.current++;
-    const folderName = folderNameResolver?.({ cwd }) ?? (cwd ? path.basename(cwd) : undefined);
+    const folderName =
+      folderNameResolver?.({ cwd }) ??
+      (cwd ? folderNameFromProjectDir(path.basename(cwd)) : undefined);
     const agent: AgentState = {
       id,
       sessionId,
@@ -1475,10 +1477,9 @@ const WORKTREE_DIR_MARKER = '--claude-worktrees-';
  *  per branch -- so cut the dir name at the worktree marker before taking the
  *  last segment; a dir with no marker is unaffected. */
 export function folderNameFromProjectDir(dirName: string): string {
-  const markerIndex = dirName.indexOf(WORKTREE_DIR_MARKER);
-  const repoPart = markerIndex === -1 ? dirName : dirName.slice(0, markerIndex);
-  const parts = repoPart.replace(/^-+/, '').split('-');
-  return parts[parts.length - 1] || repoPart;
+  dirName = dirName.split(WORKTREE_DIR_MARKER)[0];
+  const parts = dirName.replace(/^-+/, '').split('-');
+  return parts[parts.length - 1] || dirName;
 }
 
 /** Scan every session root the active provider exposes for active sessions
