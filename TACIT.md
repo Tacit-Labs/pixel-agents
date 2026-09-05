@@ -27,6 +27,17 @@ config.json (`server/src/configPersistence.ts`), broadcasting a new
 `agentPalette` message when it differs from the agent's current palette so an
 avatar can be recoloured by the director who owns it.
 
+A fourth patch benches idle work instead of leaving it seated forever: once a
+character has been continuously inactive past `LOUNGE_IDLE_SEC`
+(`webview-ui/src/constants.ts`), `OfficeState` walks it to a free tile in the
+Area named by an optional `loungeArea` config field (delivered on the same
+`areaMappingsLoaded` message as `areaMappings`), skipping any character still
+showing a permission or waiting-for-input bubble, and sends it back to its own
+seat once `setAgentActive(id, true)` marks it active again. The same patch
+dims the floor and wall tiles of any Area holding no character
+(`webview-ui/src/office/engine/renderer.ts`, `EMPTY_AREA_DIM_ALPHA`), so a room
+nobody is working in reads as unlit next to a busy one.
+
 ## Syncing upstream
 
     git fetch upstream --tags
