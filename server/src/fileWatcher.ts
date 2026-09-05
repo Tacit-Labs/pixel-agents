@@ -1115,9 +1115,7 @@ export function adoptExternalSessionFromHook(
   } else {
     // Hooks-only provider (OpenCode, Copilot): no transcript file, all state from hooks
     const id = nextAgentIdRef.current++;
-    const folderName =
-      folderNameResolver?.({ cwd }) ??
-      (cwd ? folderNameFromProjectDir(path.basename(cwd)) : undefined);
+    const folderName = folderNameResolver?.({ cwd }) ?? (cwd ? path.basename(cwd) : undefined);
     const agent: AgentState = {
       id,
       sessionId,
