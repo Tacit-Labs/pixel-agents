@@ -896,8 +896,14 @@ export class OfficeState {
         ch.moveProgress = 0;
       } else if (wasLounged) {
         // Reactivated while benched in the lounge (Tacit patch): send it back
-        // to its own seat rather than leaving it parked there. sendToSeat
-        // itself clears ch.inLounge.
+        // to its own seat rather than leaving it parked there. Clear the
+        // flag HERE, unconditionally, rather than relying on sendToSeat's own
+        // clear: sendToSeat returns early when the character has no seat (or
+        // its seat no longer exists) BEFORE reaching that line, and
+        // rebuildFromLayout nulls seatId when a character can't be re-seated
+        // (e.g. its desk was deleted) -- a lounged character in that state
+        // would otherwise stay flagged benched forever.
+        ch.inLounge = false;
         this.sendToSeat(id);
       }
       this.rebuildFurnitureInstances();

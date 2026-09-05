@@ -36,6 +36,7 @@ test('setAgentPalette changes the character palette', () => {
 
   const ch = os.characters.get(1)!;
   assert.equal(ch.palette, 3);
+  assert.equal(ch.hueShift, 0, 'hueShift left untouched when not given');
 });
 
 test("an owner's mapped colour is stable across agents created at different times", () => {

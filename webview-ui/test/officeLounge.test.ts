@@ -146,6 +146,41 @@ test('setAgentActive(id, true) sends a lounged character back to its seat', () =
   );
 });
 
+test('setAgentActive(id, true) un-benches a lounged character even when its seat is gone', () => {
+  // rebuildFromLayout nulls seatId when a character can't be re-seated (its
+  // desk was deleted). sendToSeat itself returns early in that case, before
+  // ever reaching its own ch.inLounge = false -- so setAgentActive must clear
+  // the flag unconditionally rather than relying on sendToSeat to do it.
+  const { os, seatUid } = seatOffice();
+  os.setLoungeArea('Lounge');
+  os.addAgent(1, 0, 0, seatUid, true);
+  os.setAgentActive(1, false);
+
+  const ch = os.characters.get(1)!;
+  ch.inactiveSec = LOUNGE_IDLE_SEC;
+  os.update(1);
+  os.update(1);
+  os.update(1);
+  assert.equal(ch.inLounge, true, 'sanity: benched before its desk disappears');
+
+  ch.seatId = null; // simulates rebuildFromLayout after the desk was deleted
+
+  os.setAgentActive(1, true);
+
+  assert.equal(
+    ch.inLounge,
+    false,
+    'no longer flagged as benched, despite having no seat to return to',
+  );
+  assert.equal(ch.isActive, true);
+
+  // Resumes the ordinary cycle: on the next tick, an active seatless
+  // character types in place (characters.ts' IDLE case), rather than staying
+  // frozen where tickLounge would otherwise have parked it.
+  os.update(0.1);
+  assert.equal(ch.state, CharacterState.TYPE);
+});
+
 test('walkToTile on a lounged character ends the bench', () => {
   const { os, seatUid } = seatOffice();
   os.setLoungeArea('Lounge');
