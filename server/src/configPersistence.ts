@@ -53,6 +53,10 @@ export interface PixelAgentsConfig {
   /** Per-provider hooks preference, machine-global for the same reason as the
    *  consent above. A provider absent from the map takes the default (true). */
   hooksEnabled: Record<string, boolean>;
+  /** Owner (`tacit_director`) -> palette index (Tacit patch). Configuration, not
+   *  code: an owner absent from the map keeps whatever palette its agent
+   *  already has. Read by hookEventHandler.applyLabel. */
+  ownerPalettes?: Record<string, number>;
 }
 
 const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
@@ -87,6 +91,20 @@ function parseHooksEnabled(raw: unknown): Record<string, boolean> {
   const out: Record<string, boolean> = {};
   for (const [providerId, enabled] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof enabled === 'boolean') out[providerId] = enabled;
+  }
+  return out;
+}
+
+/** Coerce a loose object into the owner->palette map, dropping entries whose value is not a
+ *  non-negative integer. Configuration, not code -- an owner absent from the map keeps
+ *  whatever palette its agent already has. */
+function parseOwnerPalettes(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [owner, palette] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof palette === 'number' && Number.isInteger(palette) && palette >= 0) {
+      out[owner] = palette;
+    }
   }
   return out;
 }
@@ -158,6 +176,7 @@ export function readConfig(): PixelAgentsConfig {
         externalAssetDirectories: [],
         hooksConsent: {},
         hooksEnabled: {},
+        ownerPalettes: {},
       };
     }
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -170,6 +189,7 @@ export function readConfig(): PixelAgentsConfig {
         : [],
       hooksConsent: parseHooksConsent(parsed.hooksConsent),
       hooksEnabled: parseHooksEnabled(parsed.hooksEnabled),
+      ownerPalettes: parseOwnerPalettes(parsed.ownerPalettes),
     };
   } catch (err) {
     console.error('[Pixel Agents] Failed to read config file:', err);
@@ -179,6 +199,7 @@ export function readConfig(): PixelAgentsConfig {
       externalAssetDirectories: [],
       hooksConsent: {},
       hooksEnabled: {},
+      ownerPalettes: {},
     };
   }
 }

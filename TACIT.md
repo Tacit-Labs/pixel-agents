@@ -17,6 +17,16 @@ external asset directories, closing an agent) now requires the same
 `ctx.privileged` token as the two hooks-consent messages already checked, so an
 untokened LAN peer can only watch the office rather than change it.
 
+A third patch extends the same labelling machinery two ways: in
+`server/src/fileWatcher.ts`, `folderNameFromProjectDir` cuts a worktree's
+project-dir name at the `--claude-worktrees-` marker before taking its last
+segment, so a worktree session keys the Areas feature by its repo rather than
+its branch; and in `server/src/hookEventHandler.ts`, `applyLabel` now also
+resolves the label's `owner` against an optional `ownerPalettes` map in
+config.json (`server/src/configPersistence.ts`), broadcasting a new
+`agentPalette` message when it differs from the agent's current palette so an
+avatar can be recoloured by the director who owns it.
+
 ## Syncing upstream
 
     git fetch upstream --tags

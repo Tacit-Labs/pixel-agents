@@ -1,6 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
+import { readConfig, writeConfig } from '../src/configPersistence.js';
 import { HookEventHandler } from '../src/hookEventHandler.js';
 import { claudeProvider } from '../src/providers/hook/claude/claude.js';
 import { SessionRouter } from '../src/sessionRouter.js';
@@ -934,5 +938,99 @@ describe('HookEventHandler', () => {
     });
     expect(agent.agentName).toBe('reviewer');
     expect(mockWebview.messages.filter((m) => m.type === 'agentTeamInfo')).toHaveLength(0);
+  });
+
+  // ── Owner palette (Tacit patch) ───────────────────────────────
+
+  describe('applyLabel: owner palette', () => {
+    let tempHome: string;
+    let originalHome: string | undefined;
+
+    beforeEach(() => {
+      tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-hook-palette-test-'));
+      originalHome = process.env.HOME;
+      process.env.HOME = tempHome;
+    });
+
+    afterEach(() => {
+      if (originalHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = originalHome;
+      }
+      fs.rmSync(tempHome, { recursive: true, force: true });
+    });
+
+    it('broadcasts agentPalette once for an owner listed in ownerPalettes', () => {
+      const cfg = readConfig();
+      cfg.ownerPalettes = { chris: 3 };
+      writeConfig(cfg);
+
+      const agent = createTestAgent({ id: 5, palette: 1 });
+      agents.set(5, agent);
+      handler.registerAgent('sess-palette', 5);
+
+      handler.handleEvent('claude', {
+        hook_event_name: 'Stop',
+        session_id: 'sess-palette',
+        tacit_director: 'chris',
+        tacit_role: 'director',
+      });
+
+      expect(agent.palette).toBe(3);
+      const palettes = mockWebview.messages.filter((m) => m.type === 'agentPalette');
+      expect(palettes).toHaveLength(1);
+      expect(palettes[0]).toMatchObject({ id: 5, palette: 3 });
+    });
+
+    it('produces no agentPalette broadcast for an owner not listed in ownerPalettes', () => {
+      const cfg = readConfig();
+      cfg.ownerPalettes = { someoneElse: 2 };
+      writeConfig(cfg);
+
+      const agent = createTestAgent({ id: 6, palette: 1 });
+      agents.set(6, agent);
+      handler.registerAgent('sess-nopalette', 6);
+
+      handler.handleEvent('claude', {
+        hook_event_name: 'Stop',
+        session_id: 'sess-nopalette',
+        tacit_director: 'chris',
+        tacit_role: 'director',
+      });
+
+      expect(agent.palette).toBe(1);
+      expect(mockWebview.messages.filter((m) => m.type === 'agentPalette')).toHaveLength(0);
+    });
+
+    it('does not re-broadcast agentPalette for a second labelled event with the same owner', () => {
+      const cfg = readConfig();
+      cfg.ownerPalettes = { chris: 3 };
+      writeConfig(cfg);
+
+      const agent = createTestAgent({ id: 7, palette: 1 });
+      agents.set(7, agent);
+      handler.registerAgent('sess-palette-2', 7);
+
+      handler.handleEvent('claude', {
+        hook_event_name: 'Stop',
+        session_id: 'sess-palette-2',
+        tacit_director: 'chris',
+        tacit_role: 'director',
+      });
+      // Role changes (so agentTeamInfo re-broadcasts), owner stays the same and
+      // already carries the mapped palette -> no second agentPalette broadcast.
+      handler.handleEvent('claude', {
+        hook_event_name: 'Stop',
+        session_id: 'sess-palette-2',
+        tacit_director: 'chris',
+        tacit_role: 'engineer',
+        tacit_job: 'sip#1',
+      });
+
+      expect(agent.palette).toBe(3);
+      expect(mockWebview.messages.filter((m) => m.type === 'agentTeamInfo')).toHaveLength(2);
+      expect(mockWebview.messages.filter((m) => m.type === 'agentPalette')).toHaveLength(1);
+    });
   });
 });

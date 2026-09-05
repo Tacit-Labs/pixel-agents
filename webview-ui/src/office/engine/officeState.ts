@@ -1086,6 +1086,17 @@ export class OfficeState {
     ch.maxContextTokens = maxContextTokens;
   }
 
+  /** Recolor an agent from its owner's configured palette (Tacit patch). A plain
+   *  field write: getCharacterSprites' cache is keyed by the (palette, hueShift)
+   *  pair itself, not by character, and the renderer re-reads ch.palette every
+   *  frame — so there is nothing here to invalidate. */
+  setAgentPalette(id: number, palette: number, hueShift?: number): void {
+    const ch = this.characters.get(id);
+    if (!ch) return;
+    ch.palette = palette;
+    if (hueShift !== undefined) ch.hueShift = hueShift;
+  }
+
   update(dt: number): void {
     // Furniture animation cycling
     const prevFrame = Math.floor(this.furnitureAnimTimer / FURNITURE_ANIM_INTERVAL_SEC);

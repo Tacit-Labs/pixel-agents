@@ -98,6 +98,8 @@ components:
         - $ref: '#/components/schemas/SubagentToolPermission'
         # Agent Teams
         - $ref: '#/components/schemas/AgentTeamInfo'
+        # Owner-derived palette (Tacit patch)
+        - $ref: '#/components/schemas/AgentPalette'
         # Context window
         - $ref: '#/components/schemas/AgentContextUsage'
         # Layout
@@ -419,6 +421,26 @@ components:
           type: integer
         teamUsesTmux:
           type: boolean
+
+    AgentPalette:
+      description: |
+        Owner-derived palette (Tacit patch): sent when an agent's label resolves
+        to an owner with a configured palette that differs from the agent's
+        current one. Not part of upstream's AgentCreated-only palette flow.
+      type: object
+      additionalProperties: false
+      required: [type, id, palette]
+      properties:
+        type:
+          const: agentPalette
+        id:
+          type: integer
+        palette:
+          type: integer
+          description: Owner-mapped character palette index.
+        hueShift:
+          type: integer
+          description: Hue shift in degrees (0-360), carried over from the agent's existing value.
 
     AgentContextUsage:
       description: |
