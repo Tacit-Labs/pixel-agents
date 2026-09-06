@@ -39,6 +39,12 @@ export interface AgentState {
    *  character renders translucent until it speaks again or is culled
    *  (Tacit patch). */
   isStale?: boolean;
+  /** The session's own process id, from the operator's hook wrapper (Tacit
+   *  patch). When present the idle sweep asks the OS whether that process is
+   *  still a Claude session and believes the answer over any silence: alive
+   *  means never ghosted however quiet, gone means removed on the next sweep.
+   *  Absent, the sweep falls back to the silence clocks above. */
+  pid?: number;
   /** True when agent has no transcript file (provider doesn't use JSONL). All state from hooks. */
   hooksOnly?: boolean;
   /** Provider that created this agent (defaults to 'claude') */

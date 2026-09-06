@@ -189,6 +189,34 @@ vocabulary living in the webview to drift. A third director-facing state,
 this: it is the one status whose first word survives the cut while losing the
 entire point of the sentence.
 
+A tenth patch replaces the clock's guess with an answer, and takes the wait
+out of the lounge. The eighth patch could only infer death from silence, and
+silence has two causes: a session that died, and a director who left one open
+at a prompt. Both went translucent after an hour, so the room showed idle
+work as lost contact, and a job that had genuinely finished haunted the lounge
+until the twelve-hour cull. The hook wrapper on the Mini now reports the
+session's own process id as `tacit_pid` (`readPid` in
+`server/src/providers/hook/claude/claude.ts`, stored on `AgentState.pid`), and
+`server/src/processLiveness.ts` asks `ps` about every reported pid once per
+sweep — for a process of any user, which is the whole reason this works from
+a shared account. A listed process whose command line names claude is alive
+and is never ghosted, however quiet; anything else is gone and is culled on
+the sweep that notices, permission ask or not, since nobody can answer an
+ask whose session no longer exists. The server's own pid rides in every query
+as a control: missing from the answer means `ps` itself failed (Windows, or
+refused), and the sweep falls back to the two silence clocks, which now apply
+only to agents the OS cannot vouch for. A pid recycled onto a shell reads as
+gone, not alive.
+
+The lounge half is one constant: `LOUNGE_IDLE_SEC` is zero. The wait was ten
+minutes, and the clock behind it runs in the page and restarts on every load,
+so a director opening the office saw every idle session at its desk for ten
+minutes before anyone moved, with the server's ghost flag replayed over the
+top of it. Now the `Stop` that ends a turn is what sends the character to a
+sofa, on the next frame, and the next hook event (`agentStatus` active from a
+prompt or a tool call) sends it back to its desk through the existing
+`setAgentActive` path. Idle and alive means on a sofa, solid; dead means gone.
+
 ## Syncing upstream
 
     git fetch upstream --tags

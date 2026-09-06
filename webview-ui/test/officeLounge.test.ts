@@ -76,6 +76,39 @@ test('an agent inactive past LOUNGE_IDLE_SEC is pathed into the lounge Area', ()
   assert.equal(ch.state, CharacterState.IDLE, 'parked, not mid-walk');
 });
 
+test('a character heads for the lounge on the first tick after its turn ends', () => {
+  // LOUNGE_IDLE_SEC is zero: no real-time wait, nothing set by hand. The
+  // Stop that ends a turn is what the server turns into setAgentActive(false),
+  // and the very next update() must already have the character walking.
+  const { os, seatUid } = seatOffice();
+  os.setLoungeArea('Lounge');
+  os.addAgent(1, 0, 0, seatUid, true);
+  os.setAgentActive(1, false);
+
+  const ch = os.characters.get(1)!;
+  assert.equal(ch.inLounge, false, 'sanity: not benched before any tick');
+  os.update(0.016);
+  assert.equal(ch.inLounge, true, 'dispatched on the first frame');
+  assert.equal(ch.state, CharacterState.WALK, 'and already walking');
+});
+
+test('the next hook event sends a benched character back to its desk', () => {
+  const { os, seatUid } = seatOffice();
+  os.setLoungeArea('Lounge');
+  os.addAgent(1, 0, 0, seatUid, true);
+  os.setAgentActive(1, false);
+  const ch = os.characters.get(1)!;
+  os.update(1);
+  os.update(1);
+  assert.equal(ch.inLounge, true, 'sanity: benched');
+
+  // A PreToolUse arrives: agentStatus active.
+  os.setAgentActive(1, true);
+  assert.equal(ch.inLounge, false, 'no longer benched');
+  assert.equal(ch.seatId, seatUid, 'still owns its desk');
+  assert.equal(ch.state, CharacterState.WALK, 'walking back');
+});
+
 test('a stale waitingAwaitingInput flag does not block the lounge (regression)', () => {
   // agentStatus{waiting, awaitingInput:true} -> showWaitingBubble(id, true) is
   // what the server sends for Claude Code's Notification(idle_prompt), which

@@ -36,7 +36,7 @@ import {
 } from './fileWatcher.js';
 import type { HookEvent } from './hookEventHandler.js';
 import { HookEventHandler } from './hookEventHandler.js';
-import { startIdleAgentSweep } from './idleAgentSweep.js';
+import { type CullReason, startIdleAgentSweep } from './idleAgentSweep.js';
 import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { PathSet, pathsMatch } from './pathKey.js';
 import { SessionRouter } from './sessionRouter.js';
@@ -452,16 +452,19 @@ export class AgentRuntime {
   }
 
   /**
-   * Start the idle sweep: ghost an external agent nothing has been heard from
-   * for IDLE_GHOST_MS, remove it at IDLE_CULL_MS (Tacit patch). This is the
-   * only path that ends a session which died without emitting SessionEnd and
-   * left its transcript behind — an ssh drop, a closed terminal, kill -9, a
-   * reboot mid-turn — none of which the two evidence-driven paths can see.
+   * Start the idle sweep (Tacit patch): remove an external agent whose
+   * reported process is gone, and for one that reported no pid, ghost it at
+   * IDLE_GHOST_MS of silence and remove it at IDLE_CULL_MS. This is the only
+   * path that ends a session which died without emitting SessionEnd and left
+   * its transcript behind — an ssh drop, a closed terminal, kill -9, a reboot
+   * mid-turn — none of which the two evidence-driven paths can see.
    */
   startIdleSweep(): void {
     if (this.idleSweepTimer) return;
 
-    this.idleSweepTimer = startIdleAgentSweep(this.store, (id) => this.cullIdleAgent(id));
+    this.idleSweepTimer = startIdleAgentSweep(this.store, (id, reason) =>
+      this.cullIdleAgent(id, reason),
+    );
   }
 
   /**
@@ -470,13 +473,15 @@ export class AgentRuntime {
    * been quiet, and its next hook event should bring the character back
    * through adoptLiveSession rather than find its transcript dismissed.
    */
-  private cullIdleAgent(id: number): void {
+  private cullIdleAgent(id: number, reason: CullReason): void {
     const agent = this.store.get(id);
     if (!agent) return;
 
-    console.log(
-      `[Pixel Agents] Idle sweep: removing agent ${id} (nothing heard for ${IDLE_CULL_MS / 3_600_000}h)`,
-    );
+    const why =
+      reason === 'gone'
+        ? `process ${agent.pid} is gone`
+        : `nothing heard for ${IDLE_CULL_MS / 3_600_000}h`;
+    console.log(`[Pixel Agents] Idle sweep: removing agent ${id} (${why})`);
     this.removeTeammates(id);
     this.subagentWatch.removeByLead(id);
     this.unregisterAgent(agent.sessionId);

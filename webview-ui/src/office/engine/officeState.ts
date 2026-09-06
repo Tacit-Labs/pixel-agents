@@ -688,7 +688,8 @@ export class OfficeState {
 
   /**
    * Bench a character in the lounge once it has been continuously inactive
-   * past LOUNGE_IDLE_SEC (Tacit patch). Skips: characters with no lounge
+   * past LOUNGE_IDLE_SEC (Tacit patch; zero today, so on the first tick after
+   * the turn ends). Skips: characters with no lounge
    * configured, already-benched (or already-heading-there) characters,
    * characters with no seat (nothing to come back to — sub-agents never have
    * one), a character showing a permission bubble (ch.bubbleType ===
@@ -704,9 +705,9 @@ export class OfficeState {
    * agentStatus{waiting, awaitingInput:true}, which the server derives from
    * Claude Code's Notification(idle_prompt) — "this REPL has been idle 60
    * seconds", not "a director was asked something" — and nothing ever clears
-   * it, so every idle session latches it at T+60s and is still latched at
-   * the LOUNGE_IDLE_SEC (600s) threshold: gating on it would silently
-   * exclude every character from ever lounging. A genuine permission prompt
+   * it, so every idle session latches it at T+60s and would still be
+   * latched at any later threshold: gating on it would silently exclude
+   * every character from ever lounging. A genuine permission prompt
    * suppresses the idle notification upstream, so bubbleType === 'permission'
    * alone loses nothing.
    */

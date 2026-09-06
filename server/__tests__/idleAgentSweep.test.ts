@@ -1,8 +1,15 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
-import { IDLE_CULL_MS, IDLE_GHOST_MS } from '../src/constants.js';
-import { classifyIdle, lastSeenAt, sweepIdleAgents } from '../src/idleAgentSweep.js';
+import { IDLE_CULL_MS, IDLE_GHOST_MS, IDLE_SWEEP_INTERVAL_MS } from '../src/constants.js';
+import {
+  classifyIdle,
+  lastSeenAt,
+  reportedPids,
+  startIdleAgentSweep,
+  sweepIdleAgents,
+} from '../src/idleAgentSweep.js';
+import type { Liveness } from '../src/processLiveness.js';
 import type { AgentState } from '../src/types.js';
 
 /**
@@ -147,6 +154,121 @@ describe('sweepIdleAgents', () => {
     sweepIdleAgents(agents, NOW, (id) => culled.push(id));
     expect(culled).toEqual([]);
     expect(agents.get(1)?.lastHookAt).toBe(NOW);
+  });
+
+  describe('with a reported pid', () => {
+    const alive = (pid: number) => new Map<number, Liveness>([[pid, 'alive']]);
+    const gone = (pid: number) => new Map<number, Liveness>([[pid, 'gone']]);
+
+    it('never ghosts an agent whose process is still running, however quiet', () => {
+      // A director who left a session at a prompt overnight has lost nothing.
+      // The character belongs on a sofa, drawn solid, not faded at its desk.
+      agents.set(1, agent(1, { pid: 4242, lastHookAt: NOW - IDLE_CULL_MS * 10 }));
+      sweepIdleAgents(agents, NOW, (id) => culled.push(id), alive(4242));
+      expect(culled).toEqual([]);
+      expect(agents.get(1)?.isStale).toBeFalsy();
+      expect(broadcasts).toEqual([]);
+    });
+
+    it('un-ghosts one the clocks had ghosted once the OS says it is running', () => {
+      agents.set(1, agent(1, { pid: 4242, isStale: true, lastHookAt: NOW - IDLE_GHOST_MS }));
+      sweepIdleAgents(agents, NOW, (id) => culled.push(id), alive(4242));
+      expect(agents.get(1)?.isStale).toBe(false);
+      expect(broadcasts).toEqual([{ type: 'agentStale', id: 1, stale: false }]);
+    });
+
+    it('culls an agent whose process is gone on the sweep that notices', () => {
+      // Seconds of silence, not hours: the process is the evidence.
+      const reasons: string[] = [];
+      agents.set(1, agent(1, { pid: 4242, lastHookAt: NOW - 1000 }));
+      sweepIdleAgents(
+        agents,
+        NOW,
+        (id, reason) => {
+          culled.push(id);
+          reasons.push(reason);
+        },
+        gone(4242),
+      );
+      expect(culled).toEqual([1]);
+      expect(reasons).toEqual(['gone']);
+    });
+
+    it('culls a gone process even with a permission ask outstanding', () => {
+      // Nobody can answer an ask whose session no longer exists.
+      agents.set(1, agent(1, { pid: 4242, permissionSent: true, lastHookAt: NOW - 1000 }));
+      sweepIdleAgents(agents, NOW, (id) => culled.push(id), gone(4242));
+      expect(culled).toEqual([1]);
+    });
+
+    it('still leaves a teammate to its lead when the process is gone', () => {
+      agents.set(1, agent(1, { pid: 4242, leadAgentId: 7, lastHookAt: NOW - 1000 }));
+      sweepIdleAgents(agents, NOW, (id) => culled.push(id), gone(4242));
+      expect(culled).toEqual([]);
+    });
+
+    it('falls back to the clocks when the OS has no answer for the pid', () => {
+      // ps unavailable, or the control pid missing from its output: the map
+      // is empty and the sweep behaves exactly as before pids existed.
+      agents.set(1, agent(1, { pid: 4242, lastHookAt: NOW - IDLE_GHOST_MS }));
+      sweepIdleAgents(agents, NOW, (id) => culled.push(id), new Map());
+      expect(agents.get(1)?.isStale).toBe(true);
+      expect(culled).toEqual([]);
+    });
+
+    it('reports the silent reason for a clock-driven cull', () => {
+      const reasons: string[] = [];
+      agents.set(1, agent(1, { lastHookAt: NOW - IDLE_CULL_MS }));
+      sweepIdleAgents(agents, NOW, (_id, reason) => reasons.push(reason));
+      expect(reasons).toEqual(['silent']);
+    });
+  });
+
+  describe('reportedPids', () => {
+    it('collects each external agent pid once, skipping terminal-backed agents', () => {
+      agents.set(1, agent(1, { pid: 10 }));
+      agents.set(2, agent(2, { pid: 10 }));
+      agents.set(3, agent(3, { pid: 11, isExternal: false }));
+      agents.set(4, agent(4));
+      expect(reportedPids(agents)).toEqual([10]);
+    });
+  });
+
+  describe('startIdleAgentSweep', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('probes every reported pid and sweeps with the answers', async () => {
+      const probed: number[][] = [];
+      agents.set(1, agent(1, { pid: 4242, lastHookAt: Date.now() }));
+      const timer = startIdleAgentSweep(
+        agents,
+        (id) => culled.push(id),
+        async (pids) => {
+          probed.push(pids);
+          return new Map<number, Liveness>([[4242, 'gone']]);
+        },
+      );
+      await vi.advanceTimersByTimeAsync(IDLE_SWEEP_INTERVAL_MS);
+      clearInterval(timer);
+      expect(probed).toEqual([[4242]]);
+      expect(culled).toEqual([1]);
+    });
+
+    it('treats a probe failure as no answer', async () => {
+      agents.set(1, agent(1, { pid: 4242, lastHookAt: Date.now() }));
+      const timer = startIdleAgentSweep(
+        agents,
+        (id) => culled.push(id),
+        async () => {
+          throw new Error('no ps here');
+        },
+      );
+      await vi.advanceTimersByTimeAsync(IDLE_SWEEP_INTERVAL_MS);
+      clearInterval(timer);
+      expect(culled).toEqual([]);
+      expect(agents.get(1)?.isStale).toBeFalsy();
+    });
   });
 
   it('culls every eligible agent in one pass', () => {

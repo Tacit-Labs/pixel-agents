@@ -1041,6 +1041,29 @@ describe('HookEventHandler', () => {
     /* eslint-enable pixel-agents/no-inline-colors */
   });
 
+  it('records the session pid from tacit_pid and keeps it across events without one', () => {
+    const agent = createTestAgent({ id: 3 });
+    agents.set(3, agent);
+    handler.registerAgent('sess-pid', 3);
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'sess-pid',
+      tacit_director: 'chris',
+      tacit_pid: 4242,
+    });
+    expect(agent.pid).toBe(4242);
+
+    // A wrapper that could not find its ancestor this time says nothing; the
+    // pid it reported before is still the session's pid.
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'sess-pid',
+      tacit_director: 'chris',
+    });
+    expect(agent.pid).toBe(4242);
+  });
+
   it('re-labels when the role changes from director to engineer', () => {
     const agent = createTestAgent({ id: 2 });
     agents.set(2, agent);

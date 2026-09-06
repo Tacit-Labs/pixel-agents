@@ -470,6 +470,7 @@ export class HookEventHandler {
       this.agents.broadcast({ type: 'agentStale', id: agentId, stale: false });
     }
     if (normalized.label) this.applyLabel(agentId, agent, normalized.label);
+    if (normalized.pid !== undefined) agent.pid = normalized.pid;
     if (debug)
       console.log(
         `[Pixel Agents] Hook: Agent ${agentId} - ${eventName} (session=${event.session_id.slice(0, 8)}...)`,

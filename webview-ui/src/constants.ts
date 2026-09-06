@@ -214,7 +214,13 @@ export const INACTIVE_SEAT_TIMER_RANGE_SEC = 2.0;
 /** Seconds a character must be CONTINUOUSLY inactive (isActive === false, no
  *  reactivation in between) before OfficeState benches it in the lounge Area
  *  instead of leaving it to sit/wander near its own desk forever. */
-export const LOUNGE_IDLE_SEC = 600;
+/** How long a character stays inactive before it walks to the lounge (Tacit
+ *  patch). Zero: the moment a turn ends the character heads for a sofa, and
+ *  the next hook event (a prompt, a tool call) sends it back to its desk. A
+ *  longer wait was tried first, but the clock runs in the page and restarts
+ *  from zero on every load, so a director opening the office saw every idle
+ *  session at its desk for that long before anyone moved. */
+export const LOUNGE_IDLE_SEC = 0;
 /** Default/fallback palette count (bundled characters). Actual count comes from getLoadedCharacterCount(). */
 export const PALETTE_COUNT = 6;
 export const AUTO_ON_FACING_DEPTH = 3;
