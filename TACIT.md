@@ -87,6 +87,17 @@ over. Only `ENOENT` now removes an agent; anything else is treated as "cannot
 tell" and the character stays. A session that has really ended is still
 cleaned up by `SessionEnd`, or by `ENOENT` once its transcript is gone.
 
+The same patch also honours the per-agent half of the module's own hooks/
+heuristic switch. Its header states that mode is chosen by `hookDelivered`
+per agent and `hooksEnabledRef` globally; the stale check consulted only the
+global flag. That flag records whether the app installed the hooks itself,
+not whether hook events are arriving, so an operator who installs hooks by
+their own means, as this office does, got heuristic-mode reaping applied to
+hook-driven agents. An agent that has had a hook delivered is now skipped,
+because `SessionEnd` already owns its lifecycle. An agent that has never had
+one is still reaped on `ENOENT`, since for that agent the file is the only
+signal there is.
+
 This is the other half of the fifth patch: adoption put the characters back,
 and this is what lets them stay.
 
