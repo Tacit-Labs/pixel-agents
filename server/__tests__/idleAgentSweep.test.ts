@@ -106,6 +106,39 @@ describe('sweepIdleAgents', () => {
     expect(culled).toEqual([]);
   });
 
+  it('never culls an agent with a permission ask outstanding', () => {
+    // Removing it removes the ask along with it — silently, twelve hours
+    // after a director was asked something, which is exactly when nobody is
+    // looking.
+    agents.set(1, agent(1, { permissionSent: true, lastHookAt: NOW - IDLE_CULL_MS }));
+    sweepIdleAgents(agents, NOW, (id) => culled.push(id));
+    expect(culled).toEqual([]);
+  });
+
+  it('culls one whose permission ask has since been answered', () => {
+    // permissionSent is cleared by the next PreToolUse and by Stop, so the
+    // exemption cannot outlive the ask that earned it.
+    agents.set(1, agent(1, { permissionSent: false, lastHookAt: NOW - IDLE_CULL_MS }));
+    sweepIdleAgents(agents, NOW, (id) => culled.push(id));
+    expect(culled).toEqual([1]);
+  });
+
+  it('still ghosts an exempt agent seen for the first time past the cull band', () => {
+    // Nothing ghosted these on the way through — the process was not running
+    // when they crossed IDLE_GHOST_MS — so this pass meets them already past
+    // the cull threshold. They stay, and they say they are out of contact.
+    agents.set(1, agent(1, { permissionSent: true, lastHookAt: NOW - IDLE_CULL_MS }));
+    agents.set(2, agent(2, { leadAgentId: 7, lastHookAt: NOW - IDLE_CULL_MS }));
+    sweepIdleAgents(agents, NOW, (id) => culled.push(id));
+    expect(culled).toEqual([]);
+    expect(agents.get(1)?.isStale).toBe(true);
+    expect(agents.get(2)?.isStale).toBe(true);
+    expect(broadcasts).toEqual([
+      { type: 'agentStale', id: 1, stale: true },
+      { type: 'agentStale', id: 2, stale: true },
+    ]);
+  });
+
   it('starts a clock rather than culling an agent that has no clock yet', () => {
     // Restored from persistence at startup: lastDataAt 0, no hook seen. Read
     // literally that is "last heard from in 1970", which would cull it on the

@@ -24,6 +24,10 @@ import type { AgentState } from './types.js';
  * culled session may simply have been quiet, and the next hook event it sends
  * should bring its character straight back via adoptLiveSession. A cull is a
  * statement about what we have heard, not about whether the session exists.
+ *
+ * A ghost is never wrong in the same way a cull can be, which is why the two
+ * exemptions below apply only to the cull: an agent that must not be removed
+ * is still an agent nobody has heard from, and saying so costs nothing.
  */
 export type IdleVerdict = 'live' | 'ghost' | 'cull';
 
@@ -75,16 +79,29 @@ export function sweepIdleAgents(
 
     const verdict = classifyIdle(now - seen);
 
-    if (verdict === 'cull') {
-      // Teammates die with their lead (removeTeammates), so culling one
-      // directly would race that path and leave the lead's children
-      // half-removed. The lead's own silence is what ends the team.
-      if (agent.leadAgentId !== undefined) continue;
+    // Two agents are never culled, however long the silence runs.
+    //
+    // A teammate dies with its lead (removeTeammates), so removing one
+    // directly would race that path and leave the lead's children
+    // half-removed. The lead's own silence is what ends the team.
+    //
+    // An agent with a permission ask outstanding is asking a director for
+    // something, and removing the character removes the ask along with it —
+    // silently, twelve hours after it was raised, which is exactly when
+    // nobody is looking. It stays, and the ghost below says how long it has
+    // been standing there unanswered.
+    const cullExempt = agent.leadAgentId !== undefined || agent.permissionSent;
+
+    if (verdict === 'cull' && !cullExempt) {
       toCull.push(id);
       continue;
     }
 
-    const stale = verdict === 'ghost';
+    // Anything still here past IDLE_GHOST_MS is ghosted — including an exempt
+    // agent past the cull threshold, which would otherwise miss its ghost
+    // entirely if the two thresholds were crossed between one sweep and the
+    // next (a laptop asleep overnight does exactly that).
+    const stale = verdict !== 'live';
     if ((agent.isStale ?? false) === stale) continue;
     agent.isStale = stale;
     agents.broadcast({ type: 'agentStale', id, stale });

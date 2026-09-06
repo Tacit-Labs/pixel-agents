@@ -141,9 +141,13 @@ because the existing `lastDataAt` is transcript-driven and stops moving for
 every session this process cannot read — which on a shared box is all of them
 but its own. A cull does _not_ dismiss the transcript, unlike `closeAgent`, so
 a session that was merely quiet returns through `adoptLiveSession` on its next
-event. And the sweep skips terminal-backed agents and teammates: the first
-have a terminal to focus whatever they last said, the second die with their
-lead.
+event. And three agents are never culled: a terminal-backed one, which has a
+terminal to focus whatever it last said; a teammate, which dies with its lead;
+and one with a permission ask outstanding (`permissionSent`), because removing
+the character removes the ask along with it, silently, half a day after a
+director was asked something. All three are still ghosted — a ghost is never
+wrong the way a cull can be, and an agent that must not be removed is still an
+agent nobody has heard from.
 
 The ghost flag rides a new `agentStale` message (declared in
 `core/asyncapi.yaml`, from which `core/src/messages.ts` is generated —
