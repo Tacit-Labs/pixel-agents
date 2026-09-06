@@ -135,6 +135,18 @@ function patchProductJsonForWindows(vscodePath: string): void {
 export default async function globalSetup(): Promise<void> {
   fs.rmSync(ALLURE_RESULTS_DIR, { recursive: true, force: true });
 
+  // A run restricted to e2e/tests/standalone drives the standalone server over
+  // HTTP and a browser; it never launches an extension host, so downloading
+  // VS Code for it is pure cost. Opting out matters most where the download is
+  // also broken: on macOS arm64, downloadAndUnzipVSCode currently reports
+  // success and returns a path that does not exist, so every spec in the run
+  // dies on `electron.launch ... ENOENT` before any test code executes,
+  // including the standalone ones that need no VS Code at all.
+  if (process.env.E2E_SKIP_VSCODE === '1') {
+    console.log('[e2e] E2E_SKIP_VSCODE=1 — not downloading VS Code');
+    return;
+  }
+
   let vscodePath = readCachedVSCodePath();
 
   if (!vscodePath) {

@@ -90,6 +90,24 @@ cleaned up by `SessionEnd`, or by `ENOENT` once its transcript is gone.
 This is the other half of the fifth patch: adoption put the characters back,
 and this is what lets them stay.
 
+A seventh change is CI-only and touches no shipped code. The macOS end-to-end
+shards ran every spec and failed every one of them inside two minutes:
+`@vscode/test-electron` on darwin-arm64 reports a successful download and
+returns a path that does not exist, so `electron.launch` dies with `ENOENT`
+before any test executes. That took out the `tests/standalone` specs too,
+which need no VS Code at all, leaving macOS with no signal about anything.
+
+macOS now runs `tests/standalone` only, with `E2E_SKIP_VSCODE=1`, which
+`e2e/global-setup.ts` honours by not downloading VS Code. The one spec under
+that directory which does launch an extension host, the multi-server
+contamination test, skips itself when that variable is set rather than
+failing. Linux and Windows are untouched and still run everything.
+
+Dropping macOS from the matrix was the alternative and costs more: this
+office is deployed on macOS, so the standalone specs are precisely the
+coverage worth keeping there. Restore the full run by clearing `specs` and
+`skip_vscode` in the matrix once the upstream download is fixed.
+
 ## Syncing upstream
 
     git fetch upstream --tags
