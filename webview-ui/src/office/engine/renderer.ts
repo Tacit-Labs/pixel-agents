@@ -73,6 +73,7 @@ import type {
 } from '../types.js';
 import { CharacterState, TILE_SIZE, TileType } from '../types.js';
 import { getWallInstances, hasWallSprites, wallColorToHex } from '../wallTiles.js';
+import { occupiedAreaLabels, shouldDimAreaTile } from './areaDim.js';
 import { getCharacterSprite } from './characters.js';
 import { renderMatrixEffect } from './matrixEffect.js';
 import { getPetSpriteData } from './petEntity.js';
@@ -298,27 +299,6 @@ export function renderAreaLabels(
 }
 
 /**
- * Distinct Area labels currently occupied by at least one character (the
- * greeter included, since it renders like one), keyed off each character's
- * live tile position. Pure and cheap — a handful of characters — so it's
- * rebuilt every frame rather than cached. Exported for direct unit testing;
- * consumed by renderFrame to feed renderEmptyAreaDim.
- */
-export function occupiedAreaLabels(
-  characters: Character[],
-  areaTiles: Array<string | null> | undefined,
-  cols: number,
-): Set<string> {
-  const out = new Set<string>();
-  if (!areaTiles || areaTiles.length === 0 || cols <= 0) return out;
-  for (const ch of characters) {
-    const label = areaTiles[ch.tileRow * cols + ch.tileCol];
-    if (label) out.add(label);
-  }
-  return out;
-}
-
-/**
  * Dim the floor/wall tiles of any Area holding no character right now (Tacit
  * patch) — the lounge Area and unzoned tiles (label null) are never dimmed.
  * A standalone pass, not folded into renderTileGrid's per-tile loop: it must
@@ -346,10 +326,7 @@ export function renderEmptyAreaDim(
   ctx.fillStyle = EMPTY_AREA_DIM_COLOR;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const label = areaTiles[r * cols + c];
-      if (!label) continue; // unzoned — never dimmed
-      if (label === loungeArea) continue; // the lounge itself — never dimmed
-      if (occupiedAreas.has(label)) continue; // someone's here — not empty
+      if (!shouldDimAreaTile(areaTiles[r * cols + c], occupiedAreas, loungeArea)) continue;
       ctx.fillRect(offsetX + c * s, offsetY + r * s, s, s);
     }
   }

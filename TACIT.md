@@ -67,6 +67,22 @@ a busy one.
 The Mini runs a pinned tag (`tacit/vX.Y.Z-N`), so a merge here changes nothing
 on the machine until `install-office.sh` is re-run at the new tag.
 
+## Always run `npm run build` before merging
+
+`npm run check-types` covers `adapters/`, `server/` and `core/`, and NOT
+`webview-ui/`. `npm run test:webview` runs vitest, which does not typecheck. So
+a webview type error passes both and only surfaces in `npm run build`, whose
+`build:webview` step runs `tsc -b`.
+
+That is not academic. `webview-ui/tsconfig.node.json` compiles `test/**` with
+`lib: ["ES2023"]` and no DOM, so a test importing a file that names
+`CanvasRenderingContext2D` (renderer.ts, matrixEffect.ts, spriteCache.ts)
+drags those types into a project that has none, and `tsc -b` fails with dozens
+of errors in code the change never touched. On 2026-09-06 that broke the
+office install on the Mini after two clean review rounds. Keep canvas-typed
+modules out of `test/` imports: put the pure decision in its own module and
+test that, as `src/office/engine/areaDim.ts` does.
+
 ## Baseline
 
 `npm run test:server` at v1.4.1: 550 tests pass.
