@@ -16,8 +16,11 @@ import assert from 'node:assert/strict';
 import { test } from 'vitest';
 
 import {
+  ASK_ACTIVITY_TEXT,
   nameLeadsPanel,
+  operatorLabel,
   PERMISSION_ACTIVITY_TEXT,
+  shortActivityText,
   WAITING_INPUT_ACTIVITY_TEXT,
 } from '../src/office/components/overlayLabel.js';
 
@@ -35,4 +38,54 @@ test('an unlabelled session is unchanged: the activity keeps the large line', ()
 test('a state that asks the director for something outranks the name', () => {
   assert.equal(nameLeadsPanel('chris · director', PERMISSION_ACTIVITY_TEXT), false);
   assert.equal(nameLeadsPanel('chris · director', WAITING_INPUT_ACTIVITY_TEXT), false);
+});
+
+test('the demoted line is cut to one word', () => {
+  // Every shape the Claude provider's formatToolStatus produces.
+  assert.equal(shortActivityText('Running: cd ~/tacit-claude/.claude/worktrees/x'), 'Running');
+  assert.equal(shortActivityText('Reading officeState.ts'), 'Reading');
+  assert.equal(shortActivityText('Editing notebook'), 'Editing');
+  assert.equal(shortActivityText('Searching files'), 'Searching');
+  assert.equal(shortActivityText('Fetching web content'), 'Fetching');
+  assert.equal(shortActivityText('Subtask: audit the deps'), 'Subtask');
+  assert.equal(shortActivityText('Creating team: reviewers'), 'Creating');
+});
+
+test('a status that is already one word is left alone', () => {
+  assert.equal(shortActivityText('Idle'), 'Idle');
+  assert.equal(shortActivityText('Planning'), 'Planning');
+});
+
+test('an empty status yields the original rather than an empty line', () => {
+  assert.equal(shortActivityText(''), '');
+  assert.equal(shortActivityText('   '), '   ');
+});
+
+test('the three director-facing states never reach the shortener', () => {
+  // They lead the panel instead, in full — "Waiting" alone would say nothing.
+  for (const s of [PERMISSION_ACTIVITY_TEXT, WAITING_INPUT_ACTIVITY_TEXT, ASK_ACTIVITY_TEXT]) {
+    assert.equal(nameLeadsPanel('chris · director', s), false);
+  }
+});
+
+test('a team panel is upstream territory and carries no operator label', () => {
+  // agentName holds two unrelated things: upstream's team role, and this
+  // fork's director/role/job. applyLabel refuses on team-shaped agents, and
+  // this mirrors that test — so a LEAD badge and a teammate role keep
+  // upstream's order and its full activity wording, which its e2e specs
+  // assert verbatim.
+  assert.equal(operatorLabel({ agentName: 'web-researcher', leadAgentId: 3 }), null);
+  assert.equal(operatorLabel({ isTeamLead: true }), null);
+  assert.equal(operatorLabel({ agentName: 'reviewer', teamName: 'audit' }), null);
+  assert.equal(operatorLabel({}), null);
+});
+
+test('an operator-labelled session is the one the patch acts on', () => {
+  assert.equal(operatorLabel({ agentName: 'chris · director' }), 'chris · director');
+  // Issue number kept to two digits on purpose: the repo's no-inline-colors
+  // rule reads a three-digit `#284` as a hex colour literal and fails the build.
+  assert.equal(
+    operatorLabel({ agentName: 'chris · engineer · refundmyrail#12' }),
+    'chris · engineer · refundmyrail#12',
+  );
 });

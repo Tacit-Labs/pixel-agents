@@ -176,6 +176,19 @@ name steps down. The predicate lives in its own React-free module so
 the node test project, the same reason `areaDim.ts` exists. A session with no
 name at all -- upstream's normal case -- renders exactly as before.
 
+The demoted line is then cut to one word (`shortActivityText`, same module).
+The full status is written to be read at the top of a panel on its own —
+`Running: cd ~/tacit-claude/.claude/worktrees/…` — and under a name, on a
+phone, it is a line of noise ending in an ellipsis: long enough to crowd the
+panel, cut too early to identify anything. `Running`, `Reading`, `Searching`
+answers the only question that line is being asked. The cut is generic rather
+than a table of tool names — text before the first colon, then its first word
+— so it follows any provider's phrasing without a second copy of that
+vocabulary living in the webview to drift. A third director-facing state,
+`Waiting for your answer` (AskUserQuestion), joined the two exempt ones for
+this: it is the one status whose first word survives the cut while losing the
+entire point of the sentence.
+
 ## Syncing upstream
 
     git fetch upstream --tags
