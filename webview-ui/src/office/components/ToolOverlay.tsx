@@ -22,12 +22,11 @@ import type { OfficeState } from '../engine/officeState.js';
 import { overlayProjection } from '../projection.js';
 import type { ToolActivity } from '../types.js';
 import { CharacterState } from '../types.js';
-
-// Both turn-end states show the green checkmark bubble. A finished turn (Stop)
-// shows ONLY the checkmark (the label falls through to its normal idle text);
-// going idle waiting on the user (Notification(idle_prompt)) additionally
-// surfaces this label. Driven by Character.waitingAwaitingInput.
-const WAITING_INPUT_ACTIVITY_TEXT = 'Waiting for input';
+import {
+  nameLeadsPanel,
+  PERMISSION_ACTIVITY_TEXT,
+  WAITING_INPUT_ACTIVITY_TEXT,
+} from './overlayLabel.js';
 
 interface ToolOverlayProps {
   officeState: OfficeState;
@@ -50,7 +49,7 @@ function getActivityText(
   bubbleType: 'permission' | 'waiting' | null,
   waitingAwaitingInput: boolean,
 ): string {
-  if (bubbleType === 'permission') return 'Needs approval';
+  if (bubbleType === 'permission') return PERMISSION_ACTIVITY_TEXT;
   // Only the idle case ("Waiting for input") gets a dedicated label. A finished
   // turn (Stop, waitingAwaitingInput=false) falls through so the checkmark alone
   // signals "done", same as the original behavior.
@@ -61,7 +60,7 @@ function getActivityText(
     // Find the latest non-done tool
     const activeTool = [...tools].reverse().find((t) => !t.done);
     if (activeTool) {
-      if (activeTool.permissionWait) return 'Needs approval';
+      if (activeTool.permissionWait) return PERMISSION_ACTIVITY_TEXT;
       return activeTool.status;
     }
     // All tools done but agent still active (mid-turn) — keep showing last tool status
@@ -167,7 +166,7 @@ export function ToolOverlay({
           activityText = WAITING_INPUT_ACTIVITY_TEXT;
         } else if (isSub) {
           if (subHasPermission) {
-            activityText = 'Needs approval';
+            activityText = PERMISSION_ACTIVITY_TEXT;
           } else {
             // Hover shows the subtask title; SELECTING the sub reveals its live
             // tool activity (watched sub-agents stream it via subagentToolStart).
@@ -205,6 +204,10 @@ export function ToolOverlay({
         const teamRoleLabel = ch.isTeamLead ? 'LEAD' : ch.agentName || null;
         const hasExtraLines = !!(ch.folderName || teamRoleLabel);
 
+        // Which of the two lines gets the large type (Tacit patch) — see
+        // nameLeadsPanel for the reasoning and its two exceptions.
+        const nameLeads = nameLeadsPanel(teamRoleLabel, activityText);
+
         // Context gauge. Every agent gets one — lead, teammate, adopted,
         // headless — as soon as it has taken a turn. Sub-agents never do: they
         // have no session of their own, so contextTokens stays 0.
@@ -237,7 +240,7 @@ export function ToolOverlay({
                   <span
                     className="overflow-hidden text-ellipsis block leading-none"
                     style={{
-                      fontSize: '18px',
+                      fontSize: nameLeads ? (isSub ? '20px' : '22px') : '18px',
                       color: ch.isTeamLead ? TEAM_LEAD_COLOR : TEAM_ROLE_COLOR,
                       fontWeight: ch.isTeamLead ? 'bold' : undefined,
                     }}
@@ -246,9 +249,11 @@ export function ToolOverlay({
                   </span>
                 )}
                 <span
-                  className="overflow-hidden text-ellipsis block leading-none"
+                  className={`overflow-hidden text-ellipsis block leading-none${
+                    nameLeads ? ' text-2xs' : ''
+                  }`}
                   style={{
-                    fontSize: isSub ? '20px' : '22px',
+                    fontSize: nameLeads ? undefined : isSub ? '20px' : '22px',
                     fontStyle: isSub ? 'italic' : undefined,
                   }}
                 >

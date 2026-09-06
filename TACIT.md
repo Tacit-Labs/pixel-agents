@@ -159,6 +159,23 @@ same office as one who left it open. The render decision itself is
 directly, kept clear of the canvas types for the reason the build note below
 gives.
 
+A ninth patch changes what the label panel above an avatar leads with. Upstream
+gives its largest line to what the agent is running -- a truncated shell command
+or `Reading foo.ts` -- and puts the agent's name above it in small type. In this
+fork every session carries a name (`applyLabel`: director, role, job), and with
+two dozen characters on screen the name is the line that says whose work you are
+looking at, while a command clipped to fit a panel says nothing anyone can act
+on. `webview-ui/src/office/components/overlayLabel.ts` (`nameLeadsPanel`) now
+decides which line gets the large type: normally the name, with the activity
+demoted underneath it in small type -- nothing is hidden, it just stops shouting.
+
+Two states are exempt, because they ask the director for something rather than
+narrating: `Needs approval` and `Waiting for input` keep the large line and the
+name steps down. The predicate lives in its own React-free module so
+`webview-ui/test/overlayLabel.test.ts` can test it without dragging the DOM into
+the node test project, the same reason `areaDim.ts` exists. A session with no
+name at all -- upstream's normal case -- renders exactly as before.
+
 ## Syncing upstream
 
     git fetch upstream --tags
