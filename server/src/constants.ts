@@ -105,6 +105,14 @@ export const IDLE_GHOST_MS = 60 * 60_000; // 1 hour
 export const IDLE_CULL_MS = 12 * 60 * 60_000; // 12 hours
 export const IDLE_SWEEP_INTERVAL_MS = 60_000;
 
+// ── Transcripts this process may not open (Tacit patch) ─────
+// A shared office serves sessions owned by other accounts, whose transcripts
+// are 0600 inside 0700 directories: every open is EACCES for as long as the
+// session lasts. readNewLines used to say so on every 500 ms poll, per agent,
+// which was nine tenths of the office log. Once refused it now asks again
+// only this often, silently, and hook events carry the agent meanwhile.
+export const TRANSCRIPT_DENIED_RETRY_MS = 60_000;
+
 // ── Layout/Config Persistence ──────────────────────────────
 export const LAYOUT_FILE_DIR = '.pixel-agents';
 export const LAYOUT_FILE_NAME = 'layout.json';

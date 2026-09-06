@@ -217,6 +217,20 @@ sofa, on the next frame, and the next hook event (`agentStatus` active from a
 prompt or a tool call) sends it back to its desk through the existing
 `setAgentActive` path. Idle and alive means on a sofa, solid; dead means gone.
 
+An eleventh patch stops the server narrating the one thing a shared office
+can never do. Claude Code writes a session's transcript 0600 inside a 0700
+project directory, so a server showing other accounts' sessions is refused
+every transcript it serves, on every 500 ms poll, for the life of every
+session — and `readNewLines` in `server/src/fileWatcher.ts` logged each
+refusal. That line was nine tenths of the office log on the Mini, ten
+megabytes an hour. A refusal (`EACCES` or `EPERM`) is now recorded on
+`AgentState.transcriptDeniedAt` and said once; the poll then stays away from
+the file for `TRANSCRIPT_DENIED_RETRY_MS` (a minute) before asking again,
+silently, and the first open that succeeds clears the mark and says so.
+`ENOENT` is as quiet as it always was, and every other read error still
+logs every time. Nothing about the agent changes: hook events drive it
+either way, and the transcript never carried anything for it.
+
 ## Syncing upstream
 
     git fetch upstream --tags

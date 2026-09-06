@@ -45,6 +45,13 @@ export interface AgentState {
    *  means never ghosted however quiet, gone means removed on the next sweep.
    *  Absent, the sweep falls back to the silence clocks above. */
   pid?: number;
+  /** When this process was last refused the transcript (EACCES/EPERM, ms
+   *  since epoch; Tacit patch). The normal state for another account's
+   *  session in a shared office: the file is there and this process may not
+   *  open it. While set, readNewLines tries again only every
+   *  TRANSCRIPT_DENIED_RETRY_MS and logs nothing; the first read that
+   *  succeeds clears it. */
+  transcriptDeniedAt?: number;
   /** True when agent has no transcript file (provider doesn't use JSONL). All state from hooks. */
   hooksOnly?: boolean;
   /** Provider that created this agent (defaults to 'claude') */
