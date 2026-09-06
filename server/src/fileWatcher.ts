@@ -41,6 +41,7 @@ import {
   GLOBAL_SCAN_ACTIVE_MAX_AGE_MS,
   GLOBAL_SCAN_ACTIVE_MIN_SIZE,
   PROJECT_SCAN_INTERVAL_MS,
+  TRANSCRIPT_DENIED_RETRY_MS,
 } from './constants.js';
 import { seedContextUsage } from './contextUsage.js';
 import type { DismissalTracker } from './dismissalTracker.js';
@@ -208,6 +209,14 @@ export function readNewLines(
 ): void {
   const agent = agents.get(agentId);
   if (!agent) return;
+  // Refused last time (see the catch below): the answer does not change from
+  // one 500 ms poll to the next, so ask again only every minute.
+  if (
+    agent.transcriptDeniedAt !== undefined &&
+    Date.now() - agent.transcriptDeniedAt < TRANSCRIPT_DENIED_RETRY_MS
+  ) {
+    return;
+  }
   try {
     const stat = fs.statSync(agent.jsonlFile);
     if (stat.size <= agent.fileOffset) return;
@@ -218,6 +227,10 @@ export function readNewLines(
     const bytesToRead = Math.min(stat.size - agent.fileOffset, MAX_READ_BYTES);
     const buf = Buffer.alloc(bytesToRead);
     const fd = fs.openSync(agent.jsonlFile, 'r');
+    if (agent.transcriptDeniedAt !== undefined) {
+      agent.transcriptDeniedAt = undefined;
+      console.log(`[Pixel Agents] Watcher: Agent ${agentId} - transcript readable again`);
+    }
     fs.readSync(fd, buf, 0, buf.length, agent.fileOffset);
     fs.closeSync(fd);
     agent.fileOffset += bytesToRead;
@@ -245,8 +258,23 @@ export function readNewLines(
       processTranscriptLine(agentId, line, agents, waitingTimers, permissionTimers);
     }
   } catch (e) {
+    const code = e instanceof Error && 'code' in e ? (e as NodeJS.ErrnoException).code : undefined;
     // ENOENT is expected for hook-detected agents where the JSONL file hasn't been created yet
-    if (e instanceof Error && 'code' in e && (e as NodeJS.ErrnoException).code === 'ENOENT') return;
+    if (code === 'ENOENT') return;
+    // Refused rather than missing (Tacit patch). The transcript exists and this
+    // process may not open it: what a shared office sees for every session
+    // owned by another account, for the whole life of that session. Say so
+    // once, then stay quiet and retry on the schedule above; hook events keep
+    // driving the agent in the meantime.
+    if (code === 'EACCES' || code === 'EPERM') {
+      if (agent.transcriptDeniedAt === undefined) {
+        console.log(
+          `[Pixel Agents] Watcher: Agent ${agentId} - cannot read transcript (${code}); hook events only until it opens`,
+        );
+      }
+      agent.transcriptDeniedAt = Date.now();
+      return;
+    }
     console.log(`[Pixel Agents] Watcher: Agent ${agentId} - read error: ${e}`);
   }
 }
