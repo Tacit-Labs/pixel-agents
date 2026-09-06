@@ -56,6 +56,25 @@ run after carpets so a carpeted room dims too
 `EMPTY_AREA_DIM_ALPHA`), so a room nobody is working in reads as unlit next to
 a busy one.
 
+A fifth patch, in `server/src/hookEventHandler.ts` (`adoptLiveSession`), lets
+the office pick up sessions that were already running when it started.
+Upstream creates an agent from `SessionStart` alone and keeps agents only in
+memory, so restarting the server makes every session already in flight
+invisible: their later events resolve to no agent and are silently dropped,
+and nothing brings them back until someone starts or resumes a conversation.
+That is a shrug on a desktop and a real problem for an always-on office on a
+shared machine, where each deploy emptied a room that had two dozen sessions
+working in it.
+
+The patch treats an event for an unknown session as the evidence it is: a
+tool call or a stop means that session is alive now. It stores the session as
+pending, and the existing confirmation path turns it into an agent on the
+next event. It never fires on `sessionStart` (handled above it) or
+`sessionEnd`, requires a transcript path or cwd, and defers to
+`isTrackedSession`, so with Watch All Sessions off it still only adopts a
+project directory some existing agent already occupies. Upstream behaviour
+with Watch All off is therefore unchanged.
+
 ## Syncing upstream
 
     git fetch upstream --tags

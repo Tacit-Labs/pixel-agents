@@ -586,6 +586,158 @@ describe('HookEventHandler', () => {
     expect(agent?.isWaiting).toBe(true);
   });
 
+  // ── Adopting a live session after a restart ─────────────────
+  //
+  // Agents live only in memory and are born from SessionStart. Restart the
+  // server and every session already in flight goes invisible: its later
+  // events resolve to no agent and are dropped. For an always-on office
+  // that is every deploy emptying a room full of working sessions.
+
+  it('adopts an unknown but live session from a plain event, then confirms it', () => {
+    const onExternalSessionDetected = vi.fn();
+    handler.setLifecycleCallbacks({ onExternalSessionDetected });
+    const watchAll = { current: true };
+    handler = new HookEventHandler(
+      agents,
+      waitingTimers,
+      permissionTimers,
+      claudeProvider,
+      new SessionRouter(),
+      watchAll,
+    );
+    handler.setLifecycleCallbacks({ onExternalSessionDetected });
+    onExternalSessionDetected.mockImplementation((sessionId: string) => {
+      const agent = createTestAgent({ id: 7, sessionId, projectDir: '/projects/live' });
+      agents.set(7, agent);
+      handler.registerAgent(sessionId, 7);
+    });
+
+    // No SessionStart was ever seen for this session: the server restarted
+    // after it began. A tool call is the first thing it hears.
+    handler.handleEvent('claude', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'live-sess',
+      tool_name: 'Read',
+      transcript_path: '/projects/live/live-sess.jsonl',
+      cwd: '/projects/live',
+    });
+    // Adopted, not yet confirmed: one event alone does not make an agent.
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+
+    // The next event confirms it, exactly as it would after a SessionStart.
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'live-sess',
+    });
+    expect(onExternalSessionDetected).toHaveBeenCalledWith(
+      'live-sess',
+      '/projects/live/live-sess.jsonl',
+      '/projects/live',
+    );
+    expect(agents.get(7)?.isWaiting).toBe(true);
+  });
+
+  it('does not adopt a session that is ending', () => {
+    const onExternalSessionDetected = vi.fn();
+    const watchAll = { current: true };
+    handler = new HookEventHandler(
+      agents,
+      waitingTimers,
+      permissionTimers,
+      claudeProvider,
+      new SessionRouter(),
+      watchAll,
+    );
+    handler.setLifecycleCallbacks({ onExternalSessionDetected });
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'SessionEnd',
+      session_id: 'dying-sess',
+      reason: 'exit',
+      transcript_path: '/projects/live/dying-sess.jsonl',
+      cwd: '/projects/live',
+    });
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'dying-sess',
+    });
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+  });
+
+  it('does not adopt an event carrying no transcript path or cwd', () => {
+    const onExternalSessionDetected = vi.fn();
+    const watchAll = { current: true };
+    handler = new HookEventHandler(
+      agents,
+      waitingTimers,
+      permissionTimers,
+      claudeProvider,
+      new SessionRouter(),
+      watchAll,
+    );
+    handler.setLifecycleCallbacks({ onExternalSessionDetected });
+
+    handler.handleEvent('claude', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'anon-sess',
+      tool_name: 'Read',
+    });
+    handler.handleEvent('claude', {
+      hook_event_name: 'Stop',
+      session_id: 'anon-sess',
+    });
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+  });
+
+  it('with Watch All off, adopts only a project dir an agent is already in', () => {
+    const onExternalSessionDetected = vi.fn();
+    handler = new HookEventHandler(
+      agents,
+      waitingTimers,
+      permissionTimers,
+      claudeProvider,
+      new SessionRouter(),
+      { current: false },
+    );
+    handler.setLifecycleCallbacks({ onExternalSessionDetected });
+
+    // A stranger's project: dropped, as before this change.
+    handler.handleEvent('claude', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'stranger',
+      tool_name: 'Read',
+      transcript_path: '/somewhere/else/stranger.jsonl',
+      cwd: '/somewhere/else',
+    });
+    handler.handleEvent('claude', { hook_event_name: 'Stop', session_id: 'stranger' });
+    expect(onExternalSessionDetected).not.toHaveBeenCalled();
+
+    // A project dir an existing agent already occupies: adopted. The agent
+    // is registered as well as created, because an agent whose session is
+    // unregistered puts the handler into its internal-agent race path,
+    // where every unknown-session event buffers instead of reaching
+    // adoption at all.
+    agents.set(3, createTestAgent({ id: 3, sessionId: 'known', projectDir: '/projects/live' }));
+    handler.registerAgent('known', 3);
+    onExternalSessionDetected.mockImplementation((sessionId: string) => {
+      agents.set(8, createTestAgent({ id: 8, sessionId, projectDir: '/projects/live' }));
+      handler.registerAgent(sessionId, 8);
+    });
+    handler.handleEvent('claude', {
+      hook_event_name: 'PreToolUse',
+      session_id: 'neighbour',
+      tool_name: 'Read',
+      transcript_path: '/projects/live/neighbour.jsonl',
+      cwd: '/projects/live',
+    });
+    handler.handleEvent('claude', { hook_event_name: 'Stop', session_id: 'neighbour' });
+    expect(onExternalSessionDetected).toHaveBeenCalledWith(
+      'neighbour',
+      '/projects/live/neighbour.jsonl',
+      '/projects/live',
+    );
+  });
+
   // ── Resume ──────────────────────────────────────────────────
 
   it('SessionStart(source=resume) calls onSessionResume', () => {

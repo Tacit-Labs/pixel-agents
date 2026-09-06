@@ -188,6 +188,58 @@ export class HookEventHandler {
     );
   }
 
+  /**
+   * Adopt a session this server has no record of but which is plainly still
+   * running, so it can become an agent without waiting for a fresh
+   * SessionStart.
+   *
+   * An agent is created from SessionStart alone, and agents live only in
+   * memory. Restart the server and every session already in flight becomes
+   * invisible: its later events all resolve to no agent and are dropped, and
+   * nothing brings it back until the person running it starts or resumes a
+   * conversation. On a desktop that is a shrug. On an always-on office
+   * watching a shared machine it means every deploy empties the room while
+   * two dozen sessions carry on working, which is exactly the state this
+   * office exists to show.
+   *
+   * The event itself is the evidence: a tool call or a stop for a session id
+   * means that session is alive right now. Store it as pending and the
+   * existing confirmation path turns it into an agent on the next event,
+   * which for a working session is seconds away. Waiting for that second
+   * event rather than adopting immediately keeps the filter that pending
+   * exists for, and avoids re-entering handleEvent from inside itself.
+   *
+   * Deliberately narrow, so this cannot widen who gets watched:
+   *   - never on sessionStart (handled above) or sessionEnd (a session that
+   *     is ending should not first be born)
+   *   - only with a transcript path or cwd to identify the session by
+   *   - only when isTrackedSession agrees, which with Watch All Sessions off
+   *     still means "a project dir some existing agent is already in"
+   *
+   * Returns true when the session was adopted.
+   */
+  private adoptLiveSession(kind: AgentEvent['kind'], event: HookEvent): boolean {
+    if (kind === 'sessionStart' || kind === 'sessionEnd') return false;
+    const transcriptPath =
+      typeof event['transcript_path'] === 'string'
+        ? (event['transcript_path'] as string)
+        : undefined;
+    const cwd = typeof event['cwd'] === 'string' ? (event['cwd'] as string) : undefined;
+    if (!transcriptPath && !cwd) return false;
+    if (!this.isTrackedSession(transcriptPath, cwd)) return false;
+    if (this.sessionRouter.hasPending(event.session_id)) return false;
+    this.sessionRouter.storePending(event.session_id, {
+      sessionId: event.session_id,
+      transcriptPath,
+      cwd: cwd ?? '',
+    });
+    if (debug)
+      console.log(
+        `[Pixel Agents] Hook: ${event.hook_event_name} -> adopting live session ${event.session_id.slice(0, 8)}..., awaiting confirmation`,
+      );
+    return true;
+  }
+
   /** Set callbacks for session lifecycle events (SessionStart/SessionEnd). */
   setLifecycleCallbacks(callbacks: SessionLifecycleCallbacks): void {
     this.lifecycleCallbacks = callbacks;
@@ -395,7 +447,11 @@ export class HookEventHandler {
             `[Pixel Agents] Hook: ${eventName} - unknown session ${event.session_id.slice(0, 8)}..., buffering`,
           );
         this.sessionRouter.bufferEvent(_providerId, event);
+        return;
       }
+      // Nothing here knows this session, but the event proves it is alive.
+      // Adopt it as pending so the next event confirms it into an agent.
+      if (this.adoptLiveSession(normEvent.kind, event)) return;
       return;
     }
 
