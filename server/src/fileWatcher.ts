@@ -1588,9 +1588,32 @@ export function startStaleExternalAgentCheck(
       try {
         fs.statSync(agent.jsonlFile);
         // File still exists — keep the agent alive regardless of mtime
-      } catch {
-        // File deleted — remove agent
-        toRemove.push(id);
+      } catch (e) {
+        // Deleted, so remove the agent — but ONLY on ENOENT. A bare catch
+        // here reads every stat failure as a deletion, and the commonest
+        // other failure is EACCES: the transcript is there and perfectly
+        // healthy, this process simply cannot see it.
+        //
+        // That is the normal state whenever the server runs as a different
+        // account from the person whose sessions it is showing. Claude Code
+        // writes a session's project directory 0700 and its transcript 0600,
+        // so a shared always-on office serving several people's sessions
+        // fails this stat for every one of them. It then despawns a
+        // character that is mid-turn, roughly once a minute, for a session
+        // that is very much alive.
+        //
+        // Treat "I cannot tell" as "keep it". A session that really has
+        // ended is cleaned up by SessionEnd, or by ENOENT once its
+        // transcript is gone.
+        const code =
+          e instanceof Error && 'code' in e ? (e as NodeJS.ErrnoException).code : undefined;
+        if (code === 'ENOENT') {
+          toRemove.push(id);
+        } else if (debug) {
+          console.log(
+            `[Pixel Agents] Watcher: Agent ${id} - keeping, cannot stat transcript (${code ?? 'unknown error'})`,
+          );
+        }
       }
     }
 
