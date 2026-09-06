@@ -28,6 +28,15 @@ function hookDrivenScenario(name: string, command: string) {
 }
 
 test.describe('Standalone / multi-server hooks', () => {
+  // Despite living under tests/standalone, this one launches a real extension
+  // host: proving the extension and the standalone server do not contaminate
+  // each other needs both of them running. A run that opted out of the VS Code
+  // download therefore cannot perform it, and should say so rather than fail.
+  test.skip(
+    process.env.E2E_SKIP_VSCODE === '1',
+    'needs an extension host, and this run skipped the VS Code download',
+  );
+
   test('extension and standalone both stay hook-driven without cross-contamination @area:standalone', async ({
     page,
     pixelAgents,

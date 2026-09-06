@@ -268,9 +268,19 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - { os: ubuntu-latest, label: linux }
-          - { os: macos-latest, label: macos }
-          - { os: windows-latest, label: windows }
+          - { os: ubuntu-latest, label: linux, specs: '', skip_vscode: '0' }
+          # macOS runs the standalone specs only, and skips the VS Code
+          # download. @vscode/test-electron on darwin-arm64 reports a
+          # successful download and hands back a path that does not exist, so
+          # the extension-host specs cannot start there at all; left in the
+          # matrix they failed every test in the run, including the standalone
+          # ones that need no VS Code, and gave no signal about anything.
+          # Dropping macOS entirely was the other option and costs more: this
+          # server is deployed on macOS, so the standalone specs are exactly
+          # the coverage worth keeping. Restore the full run by clearing
+          # specs and skip_vscode once that download is fixed upstream.
+          - { os: macos-latest, label: macos, specs: 'tests/standalone', skip_vscode: '1' }
+          - { os: windows-latest, label: windows, specs: '', skip_vscode: '0' }
         shard: [1, 2, 3]
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 60
@@ -343,7 +353,9 @@ jobs:
         if: steps.install_playwright_deps.outcome == 'success'
         # --workers=1: CI runners flake with more. Videos are kept only for
         # failing tests (Playwright default) to keep the Vercel deploy small.
-        run: npm run e2e -- --run-id ${{ matrix.target.label }}-shard-${{ matrix.shard }} --shard=${{ matrix.shard }}/3 --workers=1
+        env:
+          E2E_SKIP_VSCODE: ${{ matrix.target.skip_vscode }}
+        run: npm run e2e -- --run-id ${{ matrix.target.label }}-shard-${{ matrix.shard }} --shard=${{ matrix.shard }}/3 --workers=1 ${{ matrix.target.specs }}
         continue-on-error: true
 
       - name: Upload E2E Artifacts
