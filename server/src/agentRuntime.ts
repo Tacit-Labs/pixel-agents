@@ -14,7 +14,7 @@ import * as path from 'path';
 
 import type { HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
-import { DEFAULT_MAX_CONTEXT_TOKENS } from './constants.js';
+import { DEFAULT_MAX_CONTEXT_TOKENS, IDLE_CULL_MS } from './constants.js';
 import { DismissalTracker } from './dismissalTracker.js';
 import {
   adoptExternalSessionFromHook,
@@ -36,6 +36,7 @@ import {
 } from './fileWatcher.js';
 import type { HookEvent } from './hookEventHandler.js';
 import { HookEventHandler } from './hookEventHandler.js';
+import { startIdleAgentSweep } from './idleAgentSweep.js';
 import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { PathSet, pathsMatch } from './pathKey.js';
 import { SessionRouter } from './sessionRouter.js';
@@ -73,6 +74,7 @@ export class AgentRuntime {
   readonly activeAgentId = { current: null as number | null };
   private externalScanTimer: ReturnType<typeof setInterval> | null = null;
   private staleCheckTimer: ReturnType<typeof setInterval> | null = null;
+  private idleSweepTimer: ReturnType<typeof setInterval> | null = null;
 
   // Configuration refs (mutable, shared with scanners)
   readonly watchAllSessions = { current: false };
@@ -449,6 +451,38 @@ export class AgentRuntime {
     );
   }
 
+  /**
+   * Start the idle sweep: ghost an external agent nothing has been heard from
+   * for IDLE_GHOST_MS, remove it at IDLE_CULL_MS (Tacit patch). This is the
+   * only path that ends a session which died without emitting SessionEnd and
+   * left its transcript behind — an ssh drop, a closed terminal, kill -9, a
+   * reboot mid-turn — none of which the two evidence-driven paths can see.
+   */
+  startIdleSweep(): void {
+    if (this.idleSweepTimer) return;
+
+    this.idleSweepTimer = startIdleAgentSweep(this.store, (id) => this.cullIdleAgent(id));
+  }
+
+  /**
+   * Remove an agent the sweep has given up on. Mirrors the external branch of
+   * the SessionEnd path, minus the dismissal: a culled session may simply have
+   * been quiet, and its next hook event should bring the character back
+   * through adoptLiveSession rather than find its transcript dismissed.
+   */
+  private cullIdleAgent(id: number): void {
+    const agent = this.store.get(id);
+    if (!agent) return;
+
+    console.log(
+      `[Pixel Agents] Idle sweep: removing agent ${id} (nothing heard for ${IDLE_CULL_MS / 3_600_000}h)`,
+    );
+    this.removeTeammates(id);
+    this.subagentWatch.removeByLead(id);
+    this.unregisterAgent(agent.sessionId);
+    this.removeAgent(id);
+  }
+
   // ── Restore persisted external agents (standalone) ──
 
   /**
@@ -572,6 +606,10 @@ export class AgentRuntime {
     if (this.staleCheckTimer) {
       clearInterval(this.staleCheckTimer);
       this.staleCheckTimer = null;
+    }
+    if (this.idleSweepTimer) {
+      clearInterval(this.idleSweepTimer);
+      this.idleSweepTimer = null;
     }
 
     for (const id of [...this.store.keys()]) {

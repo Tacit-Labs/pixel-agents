@@ -736,6 +736,10 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
         }
 
         this.runtime.startStaleCheck();
+        // Ghosts and eventually removes an external agent nothing has been
+        // heard from (Tacit patch). Terminal-backed agents are exempt inside
+        // the sweep: those have a terminal to focus whatever they last said.
+        this.runtime.startIdleSweep();
 
         // Load furniture assets BEFORE sending layout
         (async () => {

@@ -1186,6 +1186,15 @@ export class OfficeState {
     ch.isHeadless = headless;
   }
 
+  /** Ghost an agent the server has stopped hearing from, or bring it back
+   *  (Tacit patch). A plain field write, like setAgentPalette: the renderer
+   *  re-reads the flag every frame, so there is nothing to invalidate. */
+  setStale(id: number, stale: boolean): void {
+    const ch = this.characters.get(id);
+    if (!ch) return;
+    ch.isStale = stale;
+  }
+
   setAgentContext(id: number, contextTokens: number, maxContextTokens: number): void {
     const ch = this.characters.get(id);
     if (!ch) return;

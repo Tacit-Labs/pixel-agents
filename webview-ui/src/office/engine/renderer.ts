@@ -33,7 +33,6 @@ import {
   GHOST_PREVIEW_TINT_ALPHA,
   GHOST_VALID_TINT,
   GRID_LINE_COLOR,
-  HEADLESS_CHARACTER_ALPHA,
   HOVERED_OUTLINE_ALPHA,
   OUTLINE_Z_SORT_OFFSET,
   ROTATE_BUTTON_BG,
@@ -74,6 +73,7 @@ import type {
 import { CharacterState, TILE_SIZE, TileType } from '../types.js';
 import { getWallInstances, hasWallSprites, wallColorToHex } from '../wallTiles.js';
 import { occupiedAreaLabels, shouldDimAreaTile } from './areaDim.js';
+import { characterAlpha } from './characterAlpha.js';
 import { getCharacterSprite } from './characters.js';
 import { renderMatrixEffect } from './matrixEffect.js';
 import { getPetSpriteData } from './petEntity.js';
@@ -442,8 +442,9 @@ export function renderScene(
     const charZY = ch.y + TILE_SIZE / 2 + CHARACTER_Z_SORT_OFFSET;
 
     // Headless agents (adopted, no terminal to focus) render translucent while
-    // the "Display headless as ghosts" setting is on.
-    const alpha = ch.isHeadless && ghostHeadlessAgents ? HEADLESS_CHARACTER_ALPHA : 1;
+    // the "Display headless as ghosts" setting is on; an agent the server has
+    // stopped hearing from renders fainter still, whatever that setting says.
+    const alpha = characterAlpha(ch, ghostHeadlessAgents);
 
     // Matrix spawn/despawn effect — skip outline, use per-pixel rendering
     if (ch.matrixEffect) {
