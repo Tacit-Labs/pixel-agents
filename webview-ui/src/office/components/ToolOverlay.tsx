@@ -25,6 +25,7 @@ import { CharacterState } from '../types.js';
 import {
   nameLeadsPanel,
   PERMISSION_ACTIVITY_TEXT,
+  shortActivityText,
   WAITING_INPUT_ACTIVITY_TEXT,
 } from './overlayLabel.js';
 
@@ -257,7 +258,7 @@ export function ToolOverlay({
                     fontStyle: isSub ? 'italic' : undefined,
                   }}
                 >
-                  {activityText}
+                  {nameLeads && !isSub ? shortActivityText(activityText) : activityText}
                 </span>
                 {ch.folderName && (
                   <span className="text-2xs leading-none overflow-hidden text-ellipsis block">

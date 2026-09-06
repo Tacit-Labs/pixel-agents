@@ -16,8 +16,10 @@ import assert from 'node:assert/strict';
 import { test } from 'vitest';
 
 import {
+  ASK_ACTIVITY_TEXT,
   nameLeadsPanel,
   PERMISSION_ACTIVITY_TEXT,
+  shortActivityText,
   WAITING_INPUT_ACTIVITY_TEXT,
 } from '../src/office/components/overlayLabel.js';
 
@@ -35,4 +37,32 @@ test('an unlabelled session is unchanged: the activity keeps the large line', ()
 test('a state that asks the director for something outranks the name', () => {
   assert.equal(nameLeadsPanel('chris · director', PERMISSION_ACTIVITY_TEXT), false);
   assert.equal(nameLeadsPanel('chris · director', WAITING_INPUT_ACTIVITY_TEXT), false);
+});
+
+test('the demoted line is cut to one word', () => {
+  // Every shape the Claude provider's formatToolStatus produces.
+  assert.equal(shortActivityText('Running: cd ~/tacit-claude/.claude/worktrees/x'), 'Running');
+  assert.equal(shortActivityText('Reading officeState.ts'), 'Reading');
+  assert.equal(shortActivityText('Editing notebook'), 'Editing');
+  assert.equal(shortActivityText('Searching files'), 'Searching');
+  assert.equal(shortActivityText('Fetching web content'), 'Fetching');
+  assert.equal(shortActivityText('Subtask: audit the deps'), 'Subtask');
+  assert.equal(shortActivityText('Creating team: reviewers'), 'Creating');
+});
+
+test('a status that is already one word is left alone', () => {
+  assert.equal(shortActivityText('Idle'), 'Idle');
+  assert.equal(shortActivityText('Planning'), 'Planning');
+});
+
+test('an empty status yields the original rather than an empty line', () => {
+  assert.equal(shortActivityText(''), '');
+  assert.equal(shortActivityText('   '), '   ');
+});
+
+test('the three director-facing states never reach the shortener', () => {
+  // They lead the panel instead, in full — "Waiting" alone would say nothing.
+  for (const s of [PERMISSION_ACTIVITY_TEXT, WAITING_INPUT_ACTIVITY_TEXT, ASK_ACTIVITY_TEXT]) {
+    assert.equal(nameLeadsPanel('chris · director', s), false);
+  }
 });
