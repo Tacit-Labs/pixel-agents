@@ -53,6 +53,17 @@ export interface PixelAgentsConfig {
   /** Per-provider hooks preference, machine-global for the same reason as the
    *  consent above. A provider absent from the map takes the default (true). */
   hooksEnabled: Record<string, boolean>;
+  /** Owner (`tacit_director`) -> palette index (Tacit patch). Configuration, not
+   *  code: an owner absent from the map keeps whatever palette its agent
+   *  already has. Read by hookEventHandler.applyLabel. */
+  ownerPalettes?: Record<string, number>;
+  /** Area label the office benches idle agents to (Tacit patch): OfficeState
+   *  walks a character to a free tile in this Area once it has been
+   *  continuously inactive past LOUNGE_IDLE_SEC, and sends it back to its seat
+   *  when it becomes active again. Undefined = lounging is off, exactly
+   *  today's "sit at the desk forever" behavior. Delivered to the webview on
+   *  `areaMappingsLoaded` alongside areaMappings. */
+  loungeArea?: string;
 }
 
 const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
@@ -89,6 +100,27 @@ function parseHooksEnabled(raw: unknown): Record<string, boolean> {
     if (typeof enabled === 'boolean') out[providerId] = enabled;
   }
   return out;
+}
+
+/** Coerce a loose object into the owner->palette map, dropping entries whose value is not a
+ *  non-negative integer. Configuration, not code -- an owner absent from the map keeps
+ *  whatever palette its agent already has. */
+function parseOwnerPalettes(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, number> = {};
+  for (const [owner, palette] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof palette === 'number' && Number.isInteger(palette) && palette >= 0) {
+      out[owner] = palette;
+    }
+  }
+  return out;
+}
+
+/** Coerce a loose value into the lounge Area label (Tacit patch), dropping anything that
+ *  isn't a non-empty string. Configuration, not code -- an unset or malformed value means
+ *  lounging is off, same as today's behavior with no lounge at all. */
+function parseLoungeArea(raw: unknown): string | undefined {
+  return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
 }
 
 /**
@@ -170,6 +202,8 @@ export function readConfig(): PixelAgentsConfig {
         : [],
       hooksConsent: parseHooksConsent(parsed.hooksConsent),
       hooksEnabled: parseHooksEnabled(parsed.hooksEnabled),
+      ownerPalettes: parseOwnerPalettes(parsed.ownerPalettes),
+      loungeArea: parseLoungeArea(parsed.loungeArea),
     };
   } catch (err) {
     console.error('[Pixel Agents] Failed to read config file:', err);

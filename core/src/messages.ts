@@ -24,6 +24,7 @@ export type ServerMessage =
   | SubagentClear
   | SubagentToolPermission
   | AgentTeamInfo
+  | AgentPalette
   | AgentContextUsage
   | LayoutLoaded
   | FurnitureAssetsLoaded
@@ -181,6 +182,13 @@ export interface AgentTeamInfo {
   teamUsesTmux?: boolean;
 }
 
+export interface AgentPalette {
+  type: 'agentPalette';
+  id: number;
+  palette: number;
+  hueShift?: number;
+}
+
 export interface AgentContextUsage {
   type: 'agentContextUsage';
   id: number;
@@ -298,6 +306,7 @@ export interface ExternalAssetDirectoriesUpdated {
 export interface AreaMappingsLoaded {
   type: 'areaMappingsLoaded';
   mappings: Record<string, string[]>;
+  loungeArea?: string | null;
 }
 
 export interface WorkspaceFolders {

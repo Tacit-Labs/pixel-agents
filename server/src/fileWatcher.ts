@@ -1465,8 +1465,17 @@ export function scanExternalDir(
   }
 }
 
-/** Derive a readable folder name from the Claude project dir hash. */
-function folderNameFromProjectDir(dirName: string): string {
+/** Claude Code's own worktrees, and the Tacit engineer's, both live under
+ *  `<repo>/.claude/worktrees/<name>`, which encodes in the project-dir name as
+ *  this literal marker. */
+const WORKTREE_DIR_MARKER = '--claude-worktrees-';
+
+/** Derive a readable folder name from the Claude project dir hash.
+ *  A worktree session is still the repo's work -- the room is per repo, not
+ *  per branch -- so cut the dir name at the worktree marker before taking the
+ *  last segment; a dir with no marker is unaffected. */
+export function folderNameFromProjectDir(dirName: string): string {
+  dirName = dirName.split(WORKTREE_DIR_MARKER)[0];
   const parts = dirName.replace(/^-+/, '').split('-');
   return parts[parts.length - 1] || dirName;
 }

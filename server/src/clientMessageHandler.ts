@@ -496,9 +496,13 @@ function handleWebviewReady(send: WsSend, ctx: ClientMessageContext): void {
 
   // 4b. Folder→Area mappings (must arrive before existingAgents so the
   // webview seat-preference logic has the dict when characters are created).
+  // loungeArea rides the same message (Tacit patch): the webview's idle-to-
+  // lounge logic needs it at the same point areaMappings does, before any
+  // agent's inactive-wander state starts ticking.
   send({
     type: 'areaMappingsLoaded',
     mappings: cfg.standalone.areaMappings ?? {},
+    loungeArea: cfg.loungeArea ?? null,
   });
 
   // Sync runtime refs with the persisted settings so scanners behave correctly

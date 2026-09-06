@@ -145,6 +145,15 @@ export const AREA_LABEL_FALLBACK_COLOR = '#ffffff';
 export const AREA_LABEL_SHADOW_COLOR = '#000000';
 /** Drop-shadow alpha behind area labels. */
 export const AREA_LABEL_SHADOW_ALPHA = 0.6;
+/** Alpha of the translucent black overlay drawn over an Area's floor/wall
+ *  tiles when it holds no character, so an idle room reads as unlit next to a
+ *  busy one. Never applied to the lounge Area, unzoned tiles, furniture, or
+ *  characters. */
+export const EMPTY_AREA_DIM_ALPHA = 0.55;
+/** Overlay color for the empty-Area dim (paired with EMPTY_AREA_DIM_ALPHA via
+ *  ctx.globalAlpha, not baked into an rgba() string, so the color itself stays
+ *  a single centralized literal). */
+export const EMPTY_AREA_DIM_COLOR = '#000000';
 
 // ── VisualColorPicker (HSV wheel + brightness for carpets) ───
 export const VISUAL_COLOR_PICKER_SV_SIZE_PX = 180;
@@ -198,6 +207,10 @@ export const WAITING_BUBBLE_DURATION_SEC = 2.0;
 export const DISMISS_BUBBLE_FAST_FADE_SEC = 0.3;
 export const INACTIVE_SEAT_TIMER_MIN_SEC = 3.0;
 export const INACTIVE_SEAT_TIMER_RANGE_SEC = 2.0;
+/** Seconds a character must be CONTINUOUSLY inactive (isActive === false, no
+ *  reactivation in between) before OfficeState benches it in the lounge Area
+ *  instead of leaving it to sit/wander near its own desk forever. */
+export const LOUNGE_IDLE_SEC = 600;
 /** Default/fallback palette count (bundled characters). Actual count comes from getLoadedCharacterCount(). */
 export const PALETTE_COUNT = 6;
 export const AUTO_ON_FACING_DEPTH = 3;

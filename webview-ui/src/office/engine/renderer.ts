@@ -22,6 +22,8 @@ import {
   CHARACTER_SITTING_OFFSET_PX,
   CHARACTER_Z_SORT_OFFSET,
   DELETE_BUTTON_BG,
+  EMPTY_AREA_DIM_ALPHA,
+  EMPTY_AREA_DIM_COLOR,
   FALLBACK_FLOOR_COLOR,
   GHOST_BORDER_HOVER_FILL,
   GHOST_BORDER_HOVER_STROKE,
@@ -291,6 +293,65 @@ export function renderAreaLabels(
     ctx.globalAlpha = AREA_LABEL_ALPHA;
     ctx.fillStyle = colorMap.get(label) ?? AREA_LABEL_FALLBACK_COLOR;
     ctx.fillText(label, cx, cy);
+  }
+  ctx.restore();
+}
+
+/**
+ * Distinct Area labels currently occupied by at least one character (the
+ * greeter included, since it renders like one), keyed off each character's
+ * live tile position. Pure and cheap — a handful of characters — so it's
+ * rebuilt every frame rather than cached. Exported for direct unit testing;
+ * consumed by renderFrame to feed renderEmptyAreaDim.
+ */
+export function occupiedAreaLabels(
+  characters: Character[],
+  areaTiles: Array<string | null> | undefined,
+  cols: number,
+): Set<string> {
+  const out = new Set<string>();
+  if (!areaTiles || areaTiles.length === 0 || cols <= 0) return out;
+  for (const ch of characters) {
+    const label = areaTiles[ch.tileRow * cols + ch.tileCol];
+    if (label) out.add(label);
+  }
+  return out;
+}
+
+/**
+ * Dim the floor/wall tiles of any Area holding no character right now (Tacit
+ * patch) — the lounge Area and unzoned tiles (label null) are never dimmed.
+ * A standalone pass, not folded into renderTileGrid's per-tile loop: it must
+ * run AFTER renderCarpetLayer, or a carpeted room (which is exactly where
+ * per-repo Areas get used) would never read as dim regardless of occupancy.
+ * One save/restore for the whole pass, not per tile.
+ *
+ * @internal
+ */
+export function renderEmptyAreaDim(
+  ctx: CanvasRenderingContext2D,
+  areaTiles: Array<string | null> | undefined,
+  cols: number,
+  rows: number,
+  offsetX: number,
+  offsetY: number,
+  zoom: number,
+  occupiedAreas: Set<string>,
+  loungeArea: string | null | undefined,
+): void {
+  if (!areaTiles || areaTiles.length === 0) return;
+  const s = TILE_SIZE * zoom;
+  ctx.save();
+  ctx.globalAlpha = EMPTY_AREA_DIM_ALPHA;
+  ctx.fillStyle = EMPTY_AREA_DIM_COLOR;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const label = areaTiles[r * cols + c];
+      if (!label) continue; // unzoned — never dimmed
+      if (label === loungeArea) continue; // the lounge itself — never dimmed
+      if (occupiedAreas.has(label)) continue; // someone's here — not empty
+      ctx.fillRect(offsetX + c * s, offsetY + r * s, s, s);
+    }
   }
   ctx.restore();
 }
@@ -903,6 +964,7 @@ export function renderFrame(
   showAreas?: boolean,
   activeAreaLabel?: string | null,
   pets?: Pet[],
+  loungeArea?: string | null,
 ): { offsetX: number; offsetY: number } {
   // Clear
   ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -922,6 +984,11 @@ export function renderFrame(
   if (carpetTiles && carpetTiles.length > 0) {
     renderCarpetLayer(ctx, carpetTiles, cols, rows, offsetX, offsetY, zoom);
   }
+
+  // Dim any Area with no character in it right now (never the lounge, never
+  // unzoned tiles). Its own pass, after carpets, so a carpeted room dims too.
+  const occupiedAreas = occupiedAreaLabels(characters, areaTiles, cols);
+  renderEmptyAreaDim(ctx, areaTiles, cols, rows, offsetX, offsetY, zoom, occupiedAreas, loungeArea);
 
   // Area overlay (translucent color wash) — above carpets, below seat indicators
   if (showAreas) {

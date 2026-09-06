@@ -211,6 +211,14 @@ export interface Character {
   bubbleTimer: number;
   /** Timer to stay seated while inactive after seat reassignment (counts down to 0) */
   seatTimer: number;
+  /** Seconds continuously inactive (isActive === false with no reactivation in
+   *  between). Reset to 0 the instant isActive flips true. Drives the idle-to-
+   *  lounge bench (Tacit patch): LOUNGE_IDLE_SEC in constants.ts. */
+  inactiveSec: number;
+  /** True once benched in the lounge Area (Tacit patch): frozen there,
+   *  skipping the ordinary inactive wander/seat-rest cycle, until
+   *  setAgentActive(id, true) sends it back to its own seat. */
+  inLounge: boolean;
   /** Whether this character represents a sub-agent (spawned by Task tool) */
   isSubagent: boolean;
   /** Parent agent ID if this is a sub-agent, null otherwise */

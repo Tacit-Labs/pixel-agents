@@ -17,6 +17,45 @@ external asset directories, closing an agent) now requires the same
 `ctx.privileged` token as the two hooks-consent messages already checked, so an
 untokened LAN peer can only watch the office rather than change it.
 
+A third patch extends the same labelling machinery two ways. In
+`server/src/fileWatcher.ts`, `folderNameFromProjectDir` cuts a worktree's
+project-dir name at the `--claude-worktrees-` marker before taking its last
+segment, so a worktree session keys the Areas feature by its repo rather than
+its branch. This covers the transcript-file resolution path only: the
+hooks-only provider branch (OpenCode, Copilot, no transcript file) still keys
+Areas by the plain `cwd` basename, so a worktree session under one of those
+providers reads as its branch, not its repo, until that path gets its own fix.
+And in `server/src/hookEventHandler.ts`, `applyLabel` now also resolves the
+label's `owner` against an optional `ownerPalettes` map in config.json
+(`server/src/configPersistence.ts`, read once and cached rather than on every
+hook event), broadcasting a new `agentPalette` message whenever the palette or
+the hueShift differs from the agent's current values (the two are always set
+together, forced to 0, so the same owner always renders as the same colour),
+so an avatar can be recoloured by the director who owns it. Because the
+marker cut landed after `areaMappings` started being persisted, a director's
+existing `config.json` may still hold folder keys from before it, e.g. a raw
+`...--claude-worktrees-engineer-issue-549` key that now never matches, since
+new sessions resolve to the repo name. Such a key is inert, not harmful, and
+drops out the next time that mapping is edited and re-saved.
+
+A fourth patch benches idle work instead of leaving it seated forever: once a
+character has been continuously inactive past `LOUNGE_IDLE_SEC`
+(`webview-ui/src/constants.ts`), `OfficeState` walks it to a free tile in the
+Area named by an optional `loungeArea` config field (delivered on the same
+`areaMappingsLoaded` message as `areaMappings`). It skips only a character
+showing a permission bubble, never a "waiting for input" one: that flag
+latches on Claude Code's ordinary 60-second idle notification and nothing
+ever clears it, so gating on it would block every idle session from ever
+lounging. It reserves its destination tile so two characters crossing the
+threshold in the same frame don't stack, and sends it back to its own seat
+once `setAgentActive(id, true)` marks it active again, as does `walkToTile` or
+`sendToSeat` commanding it elsewhere directly. The same patch dims the floor
+and wall tiles of any Area holding no character, as a standalone render pass
+run after carpets so a carpeted room dims too
+(`webview-ui/src/office/engine/renderer.ts`, `renderEmptyAreaDim`,
+`EMPTY_AREA_DIM_ALPHA`), so a room nobody is working in reads as unlit next to
+a busy one.
+
 ## Syncing upstream
 
     git fetch upstream --tags

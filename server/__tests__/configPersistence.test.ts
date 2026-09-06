@@ -274,4 +274,105 @@ describe('configPersistence: areas', () => {
       expect(reloaded.standalone.areaMappings).toEqual({});
     });
   });
+
+  // ── loungeArea (Tacit patch) ──────────────────────────────────
+  // Top-level, like ownerPalettes -- not per-namespace. Only ever tested
+  // through readConfig/writeConfig: same shape as the ownerPalettes field it
+  // sits beside, which has no dedicated parse-level unit test either.
+
+  describe('readConfig + writeConfig round-trip for loungeArea', () => {
+    it('defaults to undefined when no config file exists', () => {
+      const cfg = readConfig();
+      expect(cfg.loungeArea).toBeUndefined();
+    });
+
+    it('round-trips a set loungeArea', () => {
+      const cfg = readConfig();
+      cfg.loungeArea = 'Lounge';
+      writeConfig(cfg);
+
+      const reloaded = readConfig();
+      expect(reloaded.loungeArea).toBe('Lounge');
+    });
+
+    it('coerces a hand-edited config.json with a malformed loungeArea into undefined', () => {
+      const configDir = path.join(tempHome, '.pixel-agents');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(configDir, 'config.json'),
+        JSON.stringify({ loungeArea: 42 }),
+        'utf-8',
+      );
+
+      expect(readConfig().loungeArea).toBeUndefined();
+    });
+
+    it('coerces an empty-string loungeArea into undefined (lounging off, not a zero-length label)', () => {
+      const configDir = path.join(tempHome, '.pixel-agents');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(configDir, 'config.json'),
+        JSON.stringify({ loungeArea: '' }),
+        'utf-8',
+      );
+
+      expect(readConfig().loungeArea).toBeUndefined();
+    });
+  });
+
+  // ── ownerPalettes (Tacit patch) ────────────────────────────────
+  // Top-level, like loungeArea. parseOwnerPalettes isn't exported (same
+  // shape as parseLoungeArea above), so exercised only through
+  // readConfig/writeConfig, same as the malformed-payload cases for
+  // parseAreaMappings and loungeArea.
+
+  describe('readConfig + writeConfig round-trip for ownerPalettes', () => {
+    it('accepts a valid owner->palette mapping', () => {
+      const configDir = path.join(tempHome, '.pixel-agents');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(configDir, 'config.json'),
+        JSON.stringify({ ownerPalettes: { chris: 3, sam: 0 } }),
+        'utf-8',
+      );
+
+      expect(readConfig().ownerPalettes).toEqual({ chris: 3, sam: 0 });
+    });
+
+    it('drops a non-number palette value', () => {
+      const configDir = path.join(tempHome, '.pixel-agents');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(configDir, 'config.json'),
+        JSON.stringify({ ownerPalettes: { chris: '3', sam: 2 } }),
+        'utf-8',
+      );
+
+      expect(readConfig().ownerPalettes).toEqual({ sam: 2 });
+    });
+
+    it('drops a non-integer palette value', () => {
+      const configDir = path.join(tempHome, '.pixel-agents');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(configDir, 'config.json'),
+        JSON.stringify({ ownerPalettes: { chris: 2.5, sam: 4 } }),
+        'utf-8',
+      );
+
+      expect(readConfig().ownerPalettes).toEqual({ sam: 4 });
+    });
+
+    it('drops a negative palette value', () => {
+      const configDir = path.join(tempHome, '.pixel-agents');
+      fs.mkdirSync(configDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(configDir, 'config.json'),
+        JSON.stringify({ ownerPalettes: { chris: -1, sam: 1 } }),
+        'utf-8',
+      );
+
+      expect(readConfig().ownerPalettes).toEqual({ sam: 1 });
+    });
+  });
 });

@@ -2,6 +2,7 @@ import * as path from 'path';
 
 import type { AgentEvent, AgentLabel, HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
+import { readConfig } from './configPersistence.js';
 import { SESSION_END_GRACE_MS } from './constants.js';
 import type { SessionRouter } from './sessionRouter.js';
 import { getInlineTeammates, hasInlineTeammates, hasPromotedBackgroundAgent } from './teamUtils.js';
@@ -99,10 +100,30 @@ export class HookEventHandler {
     return this.provider.subagentToolNames;
   }
 
-  /** Show an operator-supplied label as the avatar's name. Idempotent: the
-   *  broadcast fires only when the rendered name changes, so a role that
-   *  resolves late (director -> engineer once the job record carries the
-   *  session id) re-labels once and a steady stream of events costs nothing. */
+  /** Owner->palette map (Tacit patch), read once and cached rather than on
+   *  every applyLabel call: a hook event fires per tool call per session, so
+   *  a synchronous config.json read there is a steady per-event I/O cost,
+   *  not the one-time load the map's contents deserve. Lazily populated
+   *  (rather than eagerly in the constructor) so a config write that lands
+   *  before the first hook event -- which is every test in this file's
+   *  "owner palette" suite, and any director editing config.json before an
+   *  agent's first turn -- is still picked up. */
+  private ownerPalettesCache: Record<string, number> | undefined;
+
+  private getOwnerPalettes(): Record<string, number> {
+    if (this.ownerPalettesCache === undefined) {
+      this.ownerPalettesCache = readConfig().ownerPalettes ?? {};
+    }
+    return this.ownerPalettesCache;
+  }
+
+  /** Show an operator-supplied label as the avatar's name, and recolor it if the
+   *  label's owner has a configured palette. Both halves are idempotent: each
+   *  broadcast fires only when its own piece of state actually changes, so a
+   *  role that resolves late (director -> engineer once the job record
+   *  carries the session id) re-labels once, a steady stream of identical
+   *  events costs nothing, and an owner with no configured palette never
+   *  triggers an agentPalette broadcast at all. */
   private applyLabel(agentId: number, agent: AgentState, label: AgentLabel): void {
     // Team-shaped agents use agentName as their team role name (e.g.
     // 'reviewer'), and a lead relies on it staying empty for lead detection.
@@ -111,18 +132,49 @@ export class HookEventHandler {
     // scanTeamConfigsForRemovals sweep (agentName no longer matches a
     // configured team member).
     if (agent.teamName || agent.leadAgentId !== undefined) return;
+
     const name = formatAgentLabel(label);
-    if (agent.agentName === name) return;
-    agent.agentName = name;
-    this.agents.broadcast({
-      type: 'agentTeamInfo',
-      id: agentId,
-      teamName: agent.teamName,
-      agentName: name,
-      isTeamLead: agent.isTeamLead,
-      leadAgentId: agent.leadAgentId,
-      teamUsesTmux: agent.teamUsesTmux,
-    });
+    const nameChanged = agent.agentName !== name;
+    if (nameChanged) agent.agentName = name;
+
+    // Owner->palette is configuration, not code (ownerPalettes in config.json):
+    // an owner absent from the map, or already showing the mapped palette AT
+    // hueShift 0, changes nothing here. The rendered colour is the (palette,
+    // hueShift) pair, and pickDiversePalette hands out a random 45-315 degree
+    // hueShift once an office passes six agents (the normal case on a shared
+    // Mini) -- so a mapping must also force hueShift back to 0, or the same
+    // director renders as several different colours depending purely on when
+    // each of their agents happened to spawn.
+    const mappedPalette = this.getOwnerPalettes()[label.owner];
+    const paletteChanged =
+      mappedPalette !== undefined &&
+      (agent.palette !== mappedPalette || (agent.hueShift ?? 0) !== 0);
+    if (paletteChanged) {
+      agent.palette = mappedPalette;
+      agent.hueShift = 0;
+    }
+
+    if (!nameChanged && !paletteChanged) return;
+
+    if (nameChanged) {
+      this.agents.broadcast({
+        type: 'agentTeamInfo',
+        id: agentId,
+        teamName: agent.teamName,
+        agentName: name,
+        isTeamLead: agent.isTeamLead,
+        leadAgentId: agent.leadAgentId,
+        teamUsesTmux: agent.teamUsesTmux,
+      });
+    }
+    if (paletteChanged) {
+      this.agents.broadcast({
+        type: 'agentPalette',
+        id: agentId,
+        palette: mappedPalette,
+        hueShift: agent.hueShift,
+      });
+    }
     this.agents.persist();
   }
 

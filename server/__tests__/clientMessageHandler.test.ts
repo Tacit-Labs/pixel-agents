@@ -10,7 +10,12 @@ import {
   type ClientMessageContext,
   handleClientMessage,
 } from '../src/clientMessageHandler.js';
-import { getHooksEnabled, readConfig, setHooksEnabled } from '../src/configPersistence.js';
+import {
+  getHooksEnabled,
+  readConfig,
+  setHooksEnabled,
+  writeConfig,
+} from '../src/configPersistence.js';
 import { FileStateAdapter } from '../src/fileStateAdapter.js';
 import { readLayoutFromFile } from '../src/layoutPersistence.js';
 import { CLAUDE_HOOK_EVENTS } from '../src/providers/hook/claude/constants.js';
@@ -424,6 +429,30 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
       const areaMsgs = sent.filter((m) => m.type === 'areaMappingsLoaded');
       expect(areaMsgs).toHaveLength(1);
       expect((areaMsgs[0] as { mappings: Record<string, string[]> }).mappings).toEqual({});
+    });
+
+    // ── loungeArea on the same message (Tacit patch) ────────────
+
+    it('areaMappingsLoaded carries loungeArea: null when unset', () => {
+      handleClientMessage({ type: 'webviewReady' }, (m) => sent.push(m), ctx);
+
+      const areaMsg = sent.find((m) => m.type === 'areaMappingsLoaded') as {
+        loungeArea: string | null;
+      };
+      expect(areaMsg.loungeArea).toBeNull();
+    });
+
+    it('areaMappingsLoaded carries the configured loungeArea label', () => {
+      const cfg = readConfig();
+      cfg.loungeArea = 'Lounge';
+      writeConfig(cfg);
+
+      handleClientMessage({ type: 'webviewReady' }, (m) => sent.push(m), ctx);
+
+      const areaMsg = sent.find((m) => m.type === 'areaMappingsLoaded') as {
+        loungeArea: string | null;
+      };
+      expect(areaMsg.loungeArea).toBe('Lounge');
     });
   });
 });

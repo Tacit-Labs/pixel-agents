@@ -641,6 +641,7 @@ export function useExtensionMessages(
         const mappings = (msg.mappings ?? {}) as Record<string, string[]>;
         setAreaMappings(mappings);
         os.setAreaMappings(mappings);
+        os.setLoungeArea((msg.loungeArea ?? null) as string | null);
       } else if (msg.type === 'workspaceFolders') {
         const folders = msg.folders as WorkspaceFolder[];
         setWorkspaceFolders(folders);
@@ -735,6 +736,9 @@ export function useExtensionMessages(
       } else if (msg.type === 'agentContextUsage') {
         const id = msg.id as number;
         os.setAgentContext(id, msg.contextTokens as number, msg.maxContextTokens as number);
+      } else if (msg.type === 'agentPalette') {
+        const id = msg.id as number;
+        os.setAgentPalette(id, msg.palette as number, msg.hueShift as number | undefined);
       }
     };
     const unsubscribe = transport.onMessage(handler);
