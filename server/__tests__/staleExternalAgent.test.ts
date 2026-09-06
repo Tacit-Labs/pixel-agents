@@ -115,6 +115,33 @@ describe('startStaleExternalAgentCheck', () => {
     expect(removed).toEqual([]);
   });
 
+  it('leaves a hook-driven agent alone even when its transcript is gone', () => {
+    // The module header says hooks mode is selected by hookDelivered per
+    // agent AND hooksEnabledRef globally. The check honoured only the global
+    // half, so a server receiving hooks while that flag is false reaped
+    // agents whose lifecycle SessionEnd already owns.
+    const file = path.join(tmp, 'hook-driven.jsonl');
+    const agent = externalAgent(5, file);
+    (agent as { hookDelivered: boolean }).hookDelivered = true;
+    agents.set(5, agent);
+    timer = startStaleExternalAgentCheck(agents, new Set([file]));
+    vi.advanceTimersByTime(EXTERNAL_STALE_CHECK_INTERVAL_MS * 2 + 1);
+    expect(removed).toEqual([]);
+  });
+
+  it('still removes a heuristic agent whose transcript is gone', () => {
+    // The guard above must not become a blanket amnesty: an agent that has
+    // never had a hook delivered has no SessionEnd coming for it, so the
+    // file is the only signal there is.
+    const file = path.join(tmp, 'heuristic-gone.jsonl');
+    const agent = externalAgent(6, file);
+    (agent as { hookDelivered: boolean }).hookDelivered = false;
+    agents.set(6, agent);
+    timer = startStaleExternalAgentCheck(agents, new Set([file]));
+    vi.advanceTimersByTime(EXTERNAL_STALE_CHECK_INTERVAL_MS + 1);
+    expect(removed).toEqual([6]);
+  });
+
   it('does not run at all while hooks are active', () => {
     const file = path.join(tmp, 'gone-too.jsonl');
     agents.set(4, externalAgent(4, file));

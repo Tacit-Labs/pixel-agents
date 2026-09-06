@@ -1582,6 +1582,21 @@ export function startStaleExternalAgentCheck(
     for (const [id, agent] of agents) {
       if (!agent.isExternal) continue;
 
+      // This module's own contract, from the header above: hooks mode and
+      // heuristic mode are selected by hookDelivered per agent and
+      // hooksEnabledRef globally. The early return above honours the global
+      // half; this honours the per-agent half, which the check never
+      // consulted. An agent that has had a hook event delivered is
+      // hook-driven, so SessionEnd ends it, exactly the reasoning the global
+      // guard already applies to every agent at once.
+      //
+      // It matters wherever the two disagree. A server can be receiving hooks
+      // while hooksEnabledRef is false, because that flag records whether the
+      // app installed the hooks itself, not whether events are arriving: an
+      // operator who installs hooks by their own means gets heuristic-mode
+      // reaping applied to hook-driven agents, which is the worst of both.
+      if (agent.hookDelivered) continue;
+
       // Only despawn if the JSONL file has been deleted from disk.
       // Inactive external agents stay alive so they can resume when
       // the session continues (e.g., claude --resume).
