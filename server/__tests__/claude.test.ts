@@ -253,6 +253,35 @@ describe('claudeProvider', () => {
       /* eslint-enable pixel-agents/no-inline-colors */
     });
 
+    it('carries tacit_pid through as a number', () => {
+      expect(
+        claudeProvider.normalizeHookEvent({
+          hook_event_name: 'Stop',
+          session_id: 'sess-p',
+          tacit_pid: 4242,
+        })?.pid,
+      ).toBe(4242);
+      expect(
+        claudeProvider.normalizeHookEvent({
+          hook_event_name: 'Stop',
+          session_id: 'sess-p',
+          tacit_pid: '4242',
+        })?.pid,
+      ).toBe(4242);
+    });
+
+    it('drops a tacit_pid that is not a positive integer', () => {
+      for (const bad of ['', 'abc', 0, -1, 1.5, null, {}]) {
+        expect(
+          claudeProvider.normalizeHookEvent({
+            hook_event_name: 'Stop',
+            session_id: 'sess-p',
+            tacit_pid: bad,
+          })?.pid,
+        ).toBeUndefined();
+      }
+    });
+
     it('omits the label when tacit_director is absent', () => {
       const result = claudeProvider.normalizeHookEvent({
         hook_event_name: 'Stop',

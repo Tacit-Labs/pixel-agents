@@ -91,6 +91,10 @@ export interface HookProvider {
     event: AgentEvent;
     /** Present when the payload carried operator-supplied identity fields. */
     label?: AgentLabel;
+    /** The session's own process id, when the operator's hook wrapper
+     *  reported one (`tacit_pid`). Lets the server ask the OS whether the
+     *  session is still running instead of inferring it from silence. */
+    pid?: number;
   } | null;
 
   /** Install hook scripts that POST to our server. */

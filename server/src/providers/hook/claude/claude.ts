@@ -138,6 +138,15 @@ function readLabel(raw: Record<string, unknown>): AgentLabel | undefined {
   return job ? { owner, role, job } : { owner, role };
 }
 
+/** The session's process id, as reported by the wrapper (`tacit_pid`). A
+ *  number or a numeric string; anything else, or a non-positive value, is
+ *  dropped so a malformed field never becomes a liveness claim. */
+function readPid(raw: Record<string, unknown>): number | undefined {
+  const v = raw.tacit_pid;
+  const n = typeof v === 'number' ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : NaN;
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
+}
+
 function normalizeHookEventBody(
   raw: Record<string, unknown>,
 ): { sessionId: string; event: AgentEvent } | null {
@@ -261,11 +270,16 @@ function normalizeHookEventBody(
 
 function normalizeHookEvent(
   raw: Record<string, unknown>,
-): { sessionId: string; event: AgentEvent; label?: AgentLabel } | null {
+): { sessionId: string; event: AgentEvent; label?: AgentLabel; pid?: number } | null {
   const normalized = normalizeHookEventBody(raw);
   if (!normalized) return null;
   const label = readLabel(raw);
-  return label ? { ...normalized, label } : normalized;
+  const pid = readPid(raw);
+  return {
+    ...normalized,
+    ...(label ? { label } : {}),
+    ...(pid !== undefined ? { pid } : {}),
+  };
 }
 
 // ── Installer wrappers: adapt sync signatures to async interface ──

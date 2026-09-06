@@ -1,5 +1,6 @@
 import type { AgentStateStore } from './agentStateStore.js';
 import { IDLE_CULL_MS, IDLE_GHOST_MS, IDLE_SWEEP_INTERVAL_MS } from './constants.js';
+import { type LivenessMap, probeLiveness } from './processLiveness.js';
 import type { AgentState } from './types.js';
 
 /**
@@ -28,8 +29,20 @@ import type { AgentState } from './types.js';
  * A ghost is never wrong in the same way a cull can be, which is why the two
  * exemptions below apply only to the cull: an agent that must not be removed
  * is still an agent nobody has heard from, and saying so costs nothing.
+ *
+ * Silence is only the fallback, though. An agent whose hook wrapper reported
+ * its pid is judged by the OS instead (processLiveness.ts): a running Claude
+ * process is 'live' however long it has been quiet, because a director who
+ * left a session open at a prompt has not lost anything, and the lounge is
+ * where that character belongs, drawn solid. A process that is gone is
+ * culled on the sweep that notices, not twelve hours later. The two silence
+ * thresholds still apply to any agent the OS cannot answer for.
  */
 export type IdleVerdict = 'live' | 'ghost' | 'cull';
+
+/** Why an agent was culled: its process is gone, or nothing has been heard
+ *  from it for IDLE_CULL_MS and it never reported a pid. */
+export type CullReason = 'gone' | 'silent';
 
 export function classifyIdle(idleMs: number): IdleVerdict {
   if (idleMs >= IDLE_CULL_MS) return 'cull';
@@ -58,9 +71,10 @@ export function lastSeenAt(agent: AgentState): number {
 export function sweepIdleAgents(
   agents: AgentStateStore,
   now: number,
-  cull: (id: number) => void,
+  cull: (id: number, reason: CullReason) => void,
+  liveness: LivenessMap = new Map(),
 ): void {
-  const toCull: number[] = [];
+  const toCull: Array<[number, CullReason]> = [];
 
   for (const [id, agent] of agents) {
     // A terminal-backed agent is never culled: it has a terminal to focus,
@@ -77,7 +91,16 @@ export function sweepIdleAgents(
       continue;
     }
 
-    const verdict = classifyIdle(now - seen);
+    // The OS's answer beats the clocks whenever there is one.
+    const known = agent.pid !== undefined ? liveness.get(agent.pid) : undefined;
+    if (known === 'gone' && agent.leadAgentId === undefined) {
+      // No process, no session: nothing a director could still answer, so
+      // the permission exemption below does not apply. A teammate still goes
+      // with its lead, whose own pid check ends the team.
+      toCull.push([id, 'gone']);
+      continue;
+    }
+    const verdict: IdleVerdict = known === 'alive' ? 'live' : classifyIdle(now - seen);
 
     // Two agents are never culled, however long the silence runs.
     //
@@ -93,7 +116,7 @@ export function sweepIdleAgents(
     const cullExempt = agent.leadAgentId !== undefined || agent.permissionSent;
 
     if (verdict === 'cull' && !cullExempt) {
-      toCull.push(id);
+      toCull.push([id, 'silent']);
       continue;
     }
 
@@ -108,12 +131,37 @@ export function sweepIdleAgents(
   }
 
   // Collected first: cull() removes from the store the loop is walking.
-  for (const id of toCull) cull(id);
+  for (const [id, reason] of toCull) cull(id, reason);
 }
 
+/** Every pid the sweep would want an answer for. */
+export function reportedPids(agents: AgentStateStore): number[] {
+  const pids = new Set<number>();
+  for (const agent of agents.values()) {
+    if (agent.isExternal && agent.pid !== undefined) pids.add(agent.pid);
+  }
+  return [...pids];
+}
+
+/**
+ * One timed pass: ask the OS about every reported pid, then sweep with the
+ * answers. A probe still in flight when the next tick fires is left to
+ * finish; the tick is skipped rather than stacked.
+ */
 export function startIdleAgentSweep(
   agents: AgentStateStore,
-  cull: (id: number) => void,
+  cull: (id: number, reason: CullReason) => void,
+  probe: (pids: number[]) => Promise<LivenessMap> = probeLiveness,
 ): ReturnType<typeof setInterval> {
-  return setInterval(() => sweepIdleAgents(agents, Date.now(), cull), IDLE_SWEEP_INTERVAL_MS);
+  let inFlight = false;
+  return setInterval(() => {
+    if (inFlight) return;
+    inFlight = true;
+    probe(reportedPids(agents))
+      .catch(() => new Map<number, never>())
+      .then((liveness) => sweepIdleAgents(agents, Date.now(), cull, liveness))
+      .finally(() => {
+        inFlight = false;
+      });
+  }, IDLE_SWEEP_INTERVAL_MS);
 }

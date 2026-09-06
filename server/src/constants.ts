@@ -91,6 +91,10 @@ export const SESSION_END_GRACE_MS = 2000;
 export const MAX_HOOK_BODY_SIZE = 65_536; // 64KB
 
 // ── Idle ghosting and culling (Tacit patch) ────────────────
+// These clocks apply only to an agent whose process the OS cannot vouch for
+// (no `tacit_pid` in its hook events, or `ps` unavailable). One that reported
+// a pid is judged by processLiveness.ts instead: alive is never ghosted, gone
+// is removed on the next sweep.
 /** Silence past this ghosts the character: still in the office, rendered
  *  translucent, visibly not working. Longer than any single turn, short
  *  enough that a session killed this morning reads as dead by lunchtime. */
