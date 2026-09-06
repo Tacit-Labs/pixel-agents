@@ -75,6 +75,21 @@ next event. It never fires on `sessionStart` (handled above it) or
 project directory some existing agent already occupies. Upstream behaviour
 with Watch All off is therefore unchanged.
 
+A sixth patch, in `server/src/fileWatcher.ts` (`startStaleExternalAgentCheck`),
+stops the office despawning characters it cannot see the transcript of. The
+check decides a session has ended by `stat`-ing its transcript, and a bare
+`catch` read every failure as a deletion. The commonest other failure is
+`EACCES`: Claude Code writes a session's project directory `0700` and its
+transcript `0600`, so a server running as its own account can never stat
+anyone else's, no matter how alive that session is. The result was a character
+appearing on a hook event and being reaped again within the minute, over and
+over. Only `ENOENT` now removes an agent; anything else is treated as "cannot
+tell" and the character stays. A session that has really ended is still
+cleaned up by `SessionEnd`, or by `ENOENT` once its transcript is gone.
+
+This is the other half of the fifth patch: adoption put the characters back,
+and this is what lets them stay.
+
 ## Syncing upstream
 
     git fetch upstream --tags
