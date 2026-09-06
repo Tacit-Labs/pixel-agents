@@ -459,6 +459,16 @@ export class HookEventHandler {
     if (!agent) return;
 
     agent.hookDelivered = true;
+    // The idle sweep's clock (Tacit patch). This is the one place every
+    // delivered event passes through, and the only clock that keeps ticking
+    // for a session whose transcript this process cannot read.
+    agent.lastHookAt = Date.now();
+    // An event is proof of life, so un-ghost here rather than leaving a live
+    // agent translucent until the next sweep up to IDLE_SWEEP_INTERVAL_MS away.
+    if (agent.isStale) {
+      agent.isStale = false;
+      this.agents.broadcast({ type: 'agentStale', id: agentId, stale: false });
+    }
     if (normalized.label) this.applyLabel(agentId, agent, normalized.label);
     if (debug)
       console.log(

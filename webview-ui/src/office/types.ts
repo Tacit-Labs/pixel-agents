@@ -235,6 +235,12 @@ export interface Character {
    *  focus. Rendered translucent. Teammates and sub-agents are never headless —
    *  clicking them reaches their lead's / parent's terminal. */
   isHeadless?: boolean;
+  /** Ghosted by the server's idle sweep: nothing heard from this session for
+   *  IDLE_GHOST_MS, so it renders translucent whether or not the "display
+   *  headless as ghosts" setting is on (Tacit patch). Unlike that setting this
+   *  is not a preference — it is the office saying it has lost contact — and it
+   *  clears the moment the session speaks again. */
+  isStale?: boolean;
   /** The first-run consent greeter. A MARKER, not a gate: the greeter lives in
    *  OfficeState.greeter, outside the agent map, so seat assignment, palette
    *  diversity, the FSM, hit-testing and seat persistence never see it — no

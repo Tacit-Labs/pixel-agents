@@ -293,6 +293,12 @@ async function main(): Promise<void> {
       runtime.startStaleCheck();
     }
 
+    // Outside the block above on purpose (Tacit patch): the idle sweep ages
+    // agents out by what has been heard from them, so it is just as necessary
+    // in an office that adopted every character from a hook event and never
+    // scanned a project directory at all.
+    runtime.startIdleSweep();
+
     // The URL the operator opens has to be REACHABLE (a wildcard bind address
     // is a bind target, not an address you can browse to — `--host 0.0.0.0`
     // used to print a dead `http://0.0.0.0:PORT`) and has to carry the token,

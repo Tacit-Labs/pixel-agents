@@ -30,6 +30,15 @@ export interface AgentState {
   seenUnknownRecordTypes: Set<string>;
   /** Whether a hook event has been delivered for this agent (suppresses heuristic timers) */
   hookDelivered: boolean;
+  /** Timestamp of the last delivered hook event (ms since epoch; Tacit patch).
+   *  The companion clock to lastDataAt, which stops the moment the transcript
+   *  cannot be read — the normal state for another account's session in a
+   *  shared office. Read by the idle sweep, written nowhere else. */
+  lastHookAt?: number;
+  /** Ghosted by the idle sweep: nothing heard for IDLE_GHOST_MS, so the
+   *  character renders translucent until it speaks again or is culled
+   *  (Tacit patch). */
+  isStale?: boolean;
   /** True when agent has no transcript file (provider doesn't use JSONL). All state from hooks. */
   hooksOnly?: boolean;
   /** Provider that created this agent (defaults to 'claude') */

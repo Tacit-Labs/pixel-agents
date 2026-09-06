@@ -10,6 +10,7 @@ import { hasPromotedBackgroundAgent } from './teamUtils.js';
  * 3. Background tools with runInBackground + isTeammateSpawn flags, skipping promoted spawns
  * 4. Waiting status
  * 5. Context usage
+ * 6. Ghost state (Tacit patch)
  */
 export function resendAgentActivity(
   send: (message: Record<string, unknown>) => void,
@@ -83,6 +84,14 @@ export function resendAgentActivity(
         contextTokens: agent.contextTokens,
         maxContextTokens: agent.maxContextTokens,
       });
+    }
+
+    // 6. Ghost state (Tacit patch). The idle sweep broadcasts this only when
+    // the flag flips, so without a replay a client connecting afterwards — a
+    // director opening the office page hours into the day — draws a long-dead
+    // agent as solid as a working one.
+    if (agent.isStale) {
+      send({ type: 'agentStale', id, stale: true });
     }
   }
 }

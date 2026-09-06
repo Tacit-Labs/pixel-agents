@@ -90,6 +90,17 @@ export const HOOK_EVENT_BUFFER_MS = 5_000;
 export const SESSION_END_GRACE_MS = 2000;
 export const MAX_HOOK_BODY_SIZE = 65_536; // 64KB
 
+// ── Idle ghosting and culling (Tacit patch) ────────────────
+/** Silence past this ghosts the character: still in the office, rendered
+ *  translucent, visibly not working. Longer than any single turn, short
+ *  enough that a session killed this morning reads as dead by lunchtime. */
+export const IDLE_GHOST_MS = 60 * 60_000; // 1 hour
+/** Silence past this removes the agent. Deliberately a working day past the
+ *  ghost threshold: the ghost is the signal a director reads, the cull is
+ *  only bookkeeping catching up with what the ghost already said. */
+export const IDLE_CULL_MS = 12 * 60 * 60_000; // 12 hours
+export const IDLE_SWEEP_INTERVAL_MS = 60_000;
+
 // ── Layout/Config Persistence ──────────────────────────────
 export const LAYOUT_FILE_DIR = '.pixel-agents';
 export const LAYOUT_FILE_NAME = 'layout.json';

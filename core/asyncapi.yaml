@@ -100,6 +100,8 @@ components:
         - $ref: '#/components/schemas/AgentTeamInfo'
         # Owner-derived palette (Tacit patch)
         - $ref: '#/components/schemas/AgentPalette'
+        # Idle ghosting (Tacit patch)
+        - $ref: '#/components/schemas/AgentStale'
         # Context window
         - $ref: '#/components/schemas/AgentContextUsage'
         # Layout
@@ -441,6 +443,25 @@ components:
         hueShift:
           type: integer
           description: Hue shift in degrees (0-360), carried over from the agent's existing value.
+
+    AgentStale:
+      description: |
+        Ghost an agent nothing has been heard from, or bring it back (Tacit
+        patch). Sent by the idle sweep when the flag changes, by the hook path
+        the moment a ghosted agent speaks again, and on connect for every agent
+        already ghosted. Distinct from the ghostHeadlessAgents setting, which is
+        a preference: this one reports that the office has lost contact.
+      type: object
+      additionalProperties: false
+      required: [type, id, stale]
+      properties:
+        type:
+          const: agentStale
+        id:
+          type: integer
+        stale:
+          type: boolean
+          description: True once nothing has been heard for IDLE_GHOST_MS; false when it speaks again.
 
     AgentContextUsage:
       description: |

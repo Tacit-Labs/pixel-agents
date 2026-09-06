@@ -119,6 +119,42 @@ office is deployed on macOS, so the standalone specs are precisely the
 coverage worth keeping there. Restore the full run by clearing `specs` and
 `skip_vscode` in the matrix once the upstream download is fixed.
 
+An eighth patch gives the office a clock. Until it, an agent could leave by
+exactly two routes, both evidence-driven: a `SessionEnd` hook, or its
+transcript disappearing. Neither fires for a session that dies without saying
+so — an ssh drop, a terminal closed on a running Claude, `kill -9`, a machine
+rebooting mid-turn — and every one of those leaves a perfectly healthy
+transcript behind. The character sat at its desk, walked to the lounge ten
+minutes later, and stayed there until someone restarted the daemon. On an
+always-on office that is days, and the lounge slowly filled with the dead.
+
+`server/src/idleAgentSweep.ts` runs every `IDLE_SWEEP_INTERVAL_MS` and reads
+one number: how long since anything was heard from each agent. Past
+`IDLE_GHOST_MS` (1h) the character is ghosted — still in the room, drawn at
+`STALE_CHARACTER_ALPHA`, visibly out of contact. Past `IDLE_CULL_MS` (12h) it
+is removed. The gap between the two is the point: the ghost is what a director
+reads, and the cull is bookkeeping agreeing with it half a day later.
+
+Three details carry the patch. The clock is `lastHookAt`
+(`server/src/hookEventHandler.ts`, stamped where `hookDelivered` is set),
+because the existing `lastDataAt` is transcript-driven and stops moving for
+every session this process cannot read — which on a shared box is all of them
+but its own. A cull does _not_ dismiss the transcript, unlike `closeAgent`, so
+a session that was merely quiet returns through `adoptLiveSession` on its next
+event. And the sweep skips terminal-backed agents and teammates: the first
+have a terminal to focus whatever they last said, the second die with their
+lead.
+
+The ghost flag rides a new `agentStale` message (declared in
+`core/asyncapi.yaml`, from which `core/src/messages.ts` is generated —
+`npm run asyncapi:generate`). It is broadcast when the flag flips, cleared on
+the next hook event rather than at the following sweep, and replayed by
+`resendAgentActivity`, so a director opening the page mid-morning sees the
+same office as one who left it open. The render decision itself is
+`webview-ui/src/office/engine/characterAlpha.ts`: a pure module, tested
+directly, kept clear of the canvas types for the reason the build note below
+gives.
+
 ## Syncing upstream
 
     git fetch upstream --tags

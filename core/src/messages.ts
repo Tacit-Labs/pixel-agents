@@ -25,6 +25,7 @@ export type ServerMessage =
   | SubagentToolPermission
   | AgentTeamInfo
   | AgentPalette
+  | AgentStale
   | AgentContextUsage
   | LayoutLoaded
   | FurnitureAssetsLoaded
@@ -187,6 +188,12 @@ export interface AgentPalette {
   id: number;
   palette: number;
   hueShift?: number;
+}
+
+export interface AgentStale {
+  type: 'agentStale';
+  id: number;
+  stale: boolean;
 }
 
 export interface AgentContextUsage {

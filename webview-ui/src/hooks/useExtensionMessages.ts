@@ -739,6 +739,9 @@ export function useExtensionMessages(
       } else if (msg.type === 'agentPalette') {
         const id = msg.id as number;
         os.setAgentPalette(id, msg.palette as number, msg.hueShift as number | undefined);
+      } else if (msg.type === 'agentStale') {
+        const id = msg.id as number;
+        os.setStale(id, msg.stale as boolean);
       }
     };
     const unsubscribe = transport.onMessage(handler);
