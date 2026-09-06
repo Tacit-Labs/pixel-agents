@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 
 import { test } from 'vitest';
 
-import { occupiedAreaLabels } from '../src/office/engine/renderer.js';
+import { occupiedAreaLabels } from '../src/office/engine/areaDim.js';
 import type { Character } from '../src/office/types.js';
 import { CharacterState, Direction } from '../src/office/types.js';
 
