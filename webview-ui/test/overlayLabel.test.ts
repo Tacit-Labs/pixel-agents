@@ -18,6 +18,7 @@ import { test } from 'vitest';
 import {
   ASK_ACTIVITY_TEXT,
   nameLeadsPanel,
+  operatorLabel,
   PERMISSION_ACTIVITY_TEXT,
   shortActivityText,
   WAITING_INPUT_ACTIVITY_TEXT,
@@ -65,4 +66,26 @@ test('the three director-facing states never reach the shortener', () => {
   for (const s of [PERMISSION_ACTIVITY_TEXT, WAITING_INPUT_ACTIVITY_TEXT, ASK_ACTIVITY_TEXT]) {
     assert.equal(nameLeadsPanel('chris · director', s), false);
   }
+});
+
+test('a team panel is upstream territory and carries no operator label', () => {
+  // agentName holds two unrelated things: upstream's team role, and this
+  // fork's director/role/job. applyLabel refuses on team-shaped agents, and
+  // this mirrors that test — so a LEAD badge and a teammate role keep
+  // upstream's order and its full activity wording, which its e2e specs
+  // assert verbatim.
+  assert.equal(operatorLabel({ agentName: 'web-researcher', leadAgentId: 3 }), null);
+  assert.equal(operatorLabel({ isTeamLead: true }), null);
+  assert.equal(operatorLabel({ agentName: 'reviewer', teamName: 'audit' }), null);
+  assert.equal(operatorLabel({}), null);
+});
+
+test('an operator-labelled session is the one the patch acts on', () => {
+  assert.equal(operatorLabel({ agentName: 'chris · director' }), 'chris · director');
+  // Issue number kept to two digits on purpose: the repo's no-inline-colors
+  // rule reads a three-digit `#284` as a hex colour literal and fails the build.
+  assert.equal(
+    operatorLabel({ agentName: 'chris · engineer · refundmyrail#12' }),
+    'chris · engineer · refundmyrail#12',
+  );
 });

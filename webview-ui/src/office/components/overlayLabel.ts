@@ -13,6 +13,30 @@ export const PERMISSION_ACTIVITY_TEXT = 'Needs approval';
  *  the whole point of the sentence. */
 export const ASK_ACTIVITY_TEXT = 'Waiting for your answer';
 
+/** The fields that decide whether a character carries an operator label. */
+export interface PanelLabelInputs {
+  agentName?: string;
+  isTeamLead?: boolean;
+  teamName?: string;
+  leadAgentId?: number;
+}
+
+/**
+ * The operator label, or null for a character that has none (Tacit patch).
+ *
+ * `agentName` carries two unrelated things. Upstream uses it for an Agent
+ * Teams role — `web-researcher` under a `LEAD` badge — and this fork's
+ * `applyLabel` reuses the same field for the operator label it builds from
+ * the hook's director, role and job. That server-side function refuses on any
+ * team-shaped agent, and this mirrors the same test, so nothing below ever
+ * reorders or shortens a team panel: upstream's team UI keeps upstream's
+ * layout and its full wording, which is also what its e2e specs assert.
+ */
+export function operatorLabel(ch: PanelLabelInputs): string | null {
+  if (ch.isTeamLead || ch.teamName || ch.leadAgentId !== undefined) return null;
+  return ch.agentName ?? null;
+}
+
 /**
  * Which of the panel's two lines gets the large type (Tacit patch).
  *

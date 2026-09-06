@@ -24,6 +24,7 @@ import type { ToolActivity } from '../types.js';
 import { CharacterState } from '../types.js';
 import {
   nameLeadsPanel,
+  operatorLabel,
   PERMISSION_ACTIVITY_TEXT,
   shortActivityText,
   WAITING_INPUT_ACTIVITY_TEXT,
@@ -206,8 +207,11 @@ export function ToolOverlay({
         const hasExtraLines = !!(ch.folderName || teamRoleLabel);
 
         // Which of the two lines gets the large type (Tacit patch) — see
-        // nameLeadsPanel for the reasoning and its two exceptions.
-        const nameLeads = nameLeadsPanel(teamRoleLabel, activityText);
+        // nameLeadsPanel for the reasoning and its three exceptions. Fed the
+        // OPERATOR label rather than teamRoleLabel: a team role and the `LEAD`
+        // badge are upstream's, and their panels keep upstream's order and its
+        // full wording.
+        const nameLeads = nameLeadsPanel(operatorLabel(ch), activityText);
 
         // Context gauge. Every agent gets one — lead, teammate, adopted,
         // headless — as soon as it has taken a turn. Sub-agents never do: they
