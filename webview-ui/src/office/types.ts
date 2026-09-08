@@ -219,6 +219,12 @@ export interface Character {
    *  skipping the ordinary inactive wander/seat-rest cycle, until
    *  setAgentActive(id, true) sends it back to its own seat. */
   inLounge: boolean;
+  /** The lounge seat this character was benched onto (Tacit patch), or null
+   *  when it was parked on open floor because every sofa was taken. Held only
+   *  while inLounge: it is what lets the arrival adopt the seat's facing and
+   *  seated pose, and what reserves the sofa against the next character
+   *  crossing the threshold. Cleared wherever inLounge is. */
+  loungeSeatId: string | null;
   /** Whether this character represents a sub-agent (spawned by Task tool) */
   isSubagent: boolean;
   /** Parent agent ID if this is a sub-agent, null otherwise */

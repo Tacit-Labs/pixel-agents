@@ -168,6 +168,16 @@ export class OfficeState {
       seat.assigned = false;
     }
 
+    // Both passes below snap a character onto a desk, so nobody is benched on
+    // the far side of this (Tacit patch). Releasing the sofa reservation here
+    // is the load-bearing half: `this.seats` was just rebuilt, so a retained
+    // loungeSeatId would name a seat in the old map and hold a sofa in the
+    // new one against every character that goes idle afterwards.
+    for (const ch of this.characters.values()) {
+      ch.inLounge = false;
+      ch.loungeSeatId = null;
+    }
+
     // First pass: try to keep characters at their existing seats
     for (const ch of this.characters.values()) {
       if (ch.seatId && this.seats.has(ch.seatId)) {
@@ -665,6 +675,7 @@ export class OfficeState {
     // reactivated-elsewhere or manually-reseated character would still read
     // as inLounge and the ordinary inactive cycle would never resume for it.
     ch.inLounge = false;
+    ch.loungeSeatId = null;
     const path = this.withOwnSeatUnblocked(ch, () =>
       findPath(ch.tileCol, ch.tileRow, seat.seatCol, seat.seatRow, this.tileMap, this.blockedTiles),
     );
@@ -687,6 +698,62 @@ export class OfficeState {
   }
 
   /**
+   * The nearest free sofa seat inside the lounge Area (Tacit patch), or null.
+   *
+   * Free means three things at once: unassigned (a lounge sofa CAN be some
+   * agent's home desk — the seat allocator falls back to "any free seat
+   * anywhere else" when a product room fills up, and taking that seat out
+   * from under its owner would leave it homeless), not already promised to
+   * another benched character this frame, and not physically stood on. The
+   * last two are the same reservation the tile path makes: a character
+   * mid-walk to a sofa has not arrived, so its destination has to be held or
+   * two characters crossing the threshold in one update() stack on it.
+   */
+  private closestFreeLoungeSeat(ch: Character): string | null {
+    if (!this.loungeArea) return null;
+
+    const taken = new Set<string>();
+    const standingOn = new Set<string>();
+    for (const other of this.characters.values()) {
+      if (other.inLounge && other.loungeSeatId) taken.add(other.loungeSeatId);
+      if (other.id !== ch.id) standingOn.add(`${other.tileCol},${other.tileRow}`);
+    }
+
+    let best: string | null = null;
+    let bestDist = Infinity;
+    for (const [uid, seat] of this.seats) {
+      if (seat.assigned) continue;
+      if (taken.has(uid)) continue;
+      if (standingOn.has(`${seat.seatCol},${seat.seatRow}`)) continue;
+      if (this.areaLabelAt(seat.seatCol, seat.seatRow) !== this.loungeArea) continue;
+      const dist = Math.abs(seat.seatCol - ch.tileCol) + Math.abs(seat.seatRow - ch.tileRow);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = uid;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * Adopt the seated pose on the lounge seat this character was benched onto
+   * (Tacit patch). The engine has three character states and no sitting one:
+   * a character at its desk is drawn TYPE facing the seat's direction, and
+   * that is what reads as sitting. sendToSeat does exactly this on arrival at
+   * a desk; a sofa is the same move with a different seat.
+   */
+  private sitInLounge(ch: Character): void {
+    if (!ch.loungeSeatId) return;
+    const seat = this.seats.get(ch.loungeSeatId);
+    if (!seat) return;
+    if (ch.tileCol !== seat.seatCol || ch.tileRow !== seat.seatRow) return;
+    ch.state = CharacterState.TYPE;
+    ch.dir = seat.facingDir;
+    ch.frame = 0;
+    ch.frameTimer = 0;
+  }
+
+  /**
    * Bench a character in the lounge once it has been continuously inactive
    * past LOUNGE_IDLE_SEC (Tacit patch; zero today, so on the first tick after
    * the turn ends). Skips: characters with no lounge
@@ -700,6 +767,14 @@ export class OfficeState {
    * the character exactly where the ordinary inactive wander/seat-rest cycle
    * put it — behaviour is unchanged from today whenever the lounge is unset
    * or full.
+   *
+   * A free sofa is preferred over open floor (Tacit patch). The lounge the
+   * layout builder draws is a coffee table ringed by four sofa pieces and it
+   * refuses to build a lounge seating fewer than six, so those seats are in
+   * `this.seats` like any desk chair — merely never assigned to an agent. The
+   * first version of this bench asked only for a free walkable TILE, so a
+   * dozen benched characters stood around the furniture instead of on it and
+   * the sofas read as decor. Ask for a seat first, fall back to a tile.
    *
    * Deliberately NOT gated on ch.waitingAwaitingInput. That flag is set by
    * agentStatus{waiting, awaitingInput:true}, which the server derives from
@@ -719,6 +794,36 @@ export class OfficeState {
     if (ch.inactiveSec < LOUNGE_IDLE_SEC) return;
     if (this.areaLabelAt(ch.tileCol, ch.tileRow) === this.loungeArea) {
       ch.inLounge = true;
+      return;
+    }
+
+    // A sofa if there is one going.
+    const seatUid = this.closestFreeLoungeSeat(ch);
+    if (seatUid) {
+      const seat = this.seats.get(seatUid)!;
+      const seatPath = this.withOwnSeatUnblocked(ch, () =>
+        findPath(
+          ch.tileCol,
+          ch.tileRow,
+          seat.seatCol,
+          seat.seatRow,
+          this.tileMap,
+          this.blockedTiles,
+        ),
+      );
+      ch.inLounge = true;
+      ch.loungeSeatId = seatUid;
+      if (seatPath.length === 0) {
+        // Already standing on it: adopt the pose now rather than waiting for
+        // an arrival that will never be announced.
+        this.sitInLounge(ch);
+        return;
+      }
+      ch.path = seatPath;
+      ch.moveProgress = 0;
+      ch.state = CharacterState.WALK;
+      ch.frame = 0;
+      ch.frameTimer = 0;
       return;
     }
 
@@ -751,6 +856,7 @@ export class OfficeState {
       findPath(ch.tileCol, ch.tileRow, target.col, target.row, this.tileMap, this.blockedTiles),
     );
     ch.inLounge = true;
+    ch.loungeSeatId = null; // every sofa taken: parked on open floor
     if (path.length === 0) return; // already there, or unreachable — treat as arrived
     ch.path = path;
     ch.moveProgress = 0;
@@ -774,6 +880,7 @@ export class OfficeState {
     if (path.length === 0) return false;
     // An externally commanded move ends the bench (Tacit patch) — see sendToSeat.
     ch.inLounge = false;
+    ch.loungeSeatId = null;
     ch.path = path;
     ch.moveProgress = 0;
     ch.state = CharacterState.WALK;
@@ -903,8 +1010,11 @@ export class OfficeState {
         // its seat no longer exists) BEFORE reaching that line, and
         // rebuildFromLayout nulls seatId when a character can't be re-seated
         // (e.g. its desk was deleted) -- a lounged character in that state
-        // would otherwise stay flagged benched forever.
+        // would otherwise stay flagged benched forever. Same reasoning for
+        // the sofa reservation it was holding (Tacit patch): released here so
+        // the next character to go idle can take it.
         ch.inLounge = false;
+        ch.loungeSeatId = null;
         this.sendToSeat(id);
       }
       this.rebuildFurnitureInstances();
@@ -1239,6 +1349,11 @@ export class OfficeState {
     // Mid-walk toward the lounge tile (state === WALK) must keep animating.
     const frozen = ch.inLounge && !ch.isActive && ch.state !== CharacterState.WALK;
     if (!frozen) return false;
+
+    // The walk that just finished left this character IDLE on its sofa; this
+    // is the first frame it can be seated (Tacit patch). Idempotent, so the
+    // freeze below re-asserting it every frame costs nothing.
+    if (ch.loungeSeatId && ch.state !== CharacterState.TYPE) this.sitInLounge(ch);
 
     if (ch.bubbleType === 'waiting') {
       ch.bubbleTimer -= dt;
