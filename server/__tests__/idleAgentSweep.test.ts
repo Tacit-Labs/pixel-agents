@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AgentStateStore } from '../src/agentStateStore.js';
-import { IDLE_CULL_MS, IDLE_GHOST_MS, IDLE_SWEEP_INTERVAL_MS } from '../src/constants.js';
+import {
+  IDLE_CULL_MS,
+  IDLE_GHOST_MS,
+  IDLE_SWEEP_INTERVAL_MS,
+  LIVE_IDLE_CULL_MS,
+  LIVE_IDLE_GHOST_MS,
+} from '../src/constants.js';
 import {
   classifyIdle,
   lastSeenAt,
@@ -38,6 +44,20 @@ describe('classifyIdle', () => {
     expect(classifyIdle(IDLE_GHOST_MS)).toBe('ghost');
     expect(classifyIdle(IDLE_CULL_MS - 1)).toBe('ghost');
     expect(classifyIdle(IDLE_CULL_MS)).toBe('cull');
+  });
+
+  it('reads the same three bands on the short clocks when the process is up', () => {
+    expect(classifyIdle(0, true)).toBe('live');
+    expect(classifyIdle(LIVE_IDLE_GHOST_MS - 1, true)).toBe('live');
+    expect(classifyIdle(LIVE_IDLE_GHOST_MS, true)).toBe('ghost');
+    expect(classifyIdle(LIVE_IDLE_CULL_MS - 1, true)).toBe('ghost');
+    expect(classifyIdle(LIVE_IDLE_CULL_MS)).toBe('live'); // the long clocks say otherwise
+    expect(classifyIdle(LIVE_IDLE_CULL_MS, true)).toBe('cull');
+  });
+
+  it('gives a live process a longer benefit of the doubt, not a permanent one', () => {
+    expect(LIVE_IDLE_GHOST_MS).toBeLessThan(IDLE_GHOST_MS);
+    expect(LIVE_IDLE_CULL_MS).toBeLessThan(IDLE_CULL_MS);
   });
 });
 
@@ -160,18 +180,55 @@ describe('sweepIdleAgents', () => {
     const alive = (pid: number) => new Map<number, Liveness>([[pid, 'alive']]);
     const gone = (pid: number) => new Map<number, Liveness>([[pid, 'gone']]);
 
-    it('never ghosts an agent whose process is still running, however quiet', () => {
-      // A director who left a session at a prompt overnight has lost nothing.
-      // The character belongs on a sofa, drawn solid, not faded at its desk.
-      agents.set(1, agent(1, { pid: 4242, lastHookAt: NOW - IDLE_CULL_MS * 10 }));
+    it('leaves a running process alone while it is only briefly quiet', () => {
+      // A director reading the last turn's output has lost nothing, and the
+      // character belongs on a sofa, drawn solid.
+      agents.set(1, agent(1, { pid: 4242, lastHookAt: NOW - (LIVE_IDLE_GHOST_MS - 1000) }));
       sweepIdleAgents(agents, NOW, (id) => culled.push(id), alive(4242));
       expect(culled).toEqual([]);
       expect(agents.get(1)?.isStale).toBeFalsy();
       expect(broadcasts).toEqual([]);
     });
 
+    it('ghosts a running process that has gone quiet past the short threshold', () => {
+      // A live pid says nothing crashed. It does not say anyone is there: the
+      // desktop app holds a process per open tab for as long as the box is up.
+      agents.set(1, agent(1, { pid: 4242, lastHookAt: NOW - LIVE_IDLE_GHOST_MS }));
+      sweepIdleAgents(agents, NOW, (id) => culled.push(id), alive(4242));
+      expect(culled).toEqual([]);
+      expect(agents.get(1)?.isStale).toBe(true);
+      expect(broadcasts).toEqual([{ type: 'agentStale', id: 1, stale: true }]);
+    });
+
+    it('culls a running process quiet past the short cull threshold', () => {
+      const reasons: string[] = [];
+      agents.set(1, agent(1, { pid: 4242, lastHookAt: NOW - LIVE_IDLE_CULL_MS }));
+      sweepIdleAgents(
+        agents,
+        NOW,
+        (id, reason) => {
+          culled.push(id);
+          reasons.push(reason);
+        },
+        alive(4242),
+      );
+      expect(culled).toEqual([1]);
+      expect(reasons).toEqual(['idle']);
+    });
+
+    it('never culls a running process with a permission ask outstanding', () => {
+      // Unlike a gone process, this one could still be answered.
+      agents.set(
+        1,
+        agent(1, { pid: 4242, permissionSent: true, lastHookAt: NOW - LIVE_IDLE_CULL_MS * 10 }),
+      );
+      sweepIdleAgents(agents, NOW, (id) => culled.push(id), alive(4242));
+      expect(culled).toEqual([]);
+      expect(agents.get(1)?.isStale).toBe(true);
+    });
+
     it('un-ghosts one the clocks had ghosted once the OS says it is running', () => {
-      agents.set(1, agent(1, { pid: 4242, isStale: true, lastHookAt: NOW - IDLE_GHOST_MS }));
+      agents.set(1, agent(1, { pid: 4242, isStale: true, lastHookAt: NOW - 1000 }));
       sweepIdleAgents(agents, NOW, (id) => culled.push(id), alive(4242));
       expect(agents.get(1)?.isStale).toBe(false);
       expect(broadcasts).toEqual([{ type: 'agentStale', id: 1, stale: false }]);

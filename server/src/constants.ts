@@ -91,10 +91,11 @@ export const SESSION_END_GRACE_MS = 2000;
 export const MAX_HOOK_BODY_SIZE = 65_536; // 64KB
 
 // ── Idle ghosting and culling (Tacit patch) ────────────────
-// These clocks apply only to an agent whose process the OS cannot vouch for
-// (no `tacit_pid` in its hook events, or `ps` unavailable). One that reported
-// a pid is judged by processLiveness.ts instead: alive is never ghosted, gone
-// is removed on the next sweep.
+// Two pairs of clocks, chosen per agent by what the OS can tell us about its
+// process (processLiveness.ts). The LIVE_ pair applies to an agent whose
+// process is running; the longer pair to one the OS cannot vouch for (no
+// `tacit_pid` in its hook events, or `ps` unavailable). A process the OS says
+// is gone skips both and is removed on the next sweep.
 /** Silence past this ghosts the character: still in the office, rendered
  *  translucent, visibly not working. Longer than any single turn, short
  *  enough that a session killed this morning reads as dead by lunchtime. */
@@ -103,6 +104,15 @@ export const IDLE_GHOST_MS = 60 * 60_000; // 1 hour
  *  ghost threshold: the ghost is the signal a director reads, the cull is
  *  only bookkeeping catching up with what the ghost already said. */
 export const IDLE_CULL_MS = 12 * 60 * 60_000; // 12 hours
+/** Silence past this ghosts a character whose process IS still running.
+ *  A live process is no longer read as "still working": the Claude desktop
+ *  app holds one process per open conversation and Remote Control one per
+ *  repo, for days, so liveness says only that a window was never closed. */
+export const LIVE_IDLE_GHOST_MS = 10 * 60_000; // 10 minutes
+/** Silence past this removes a character whose process is still running.
+ *  Short on purpose, and cheap: a cull dismisses nothing, so the very next
+ *  hook event brings the session back through adoptLiveSession. */
+export const LIVE_IDLE_CULL_MS = 30 * 60_000; // 30 minutes
 export const IDLE_SWEEP_INTERVAL_MS = 60_000;
 
 // ── Transcripts this process may not open (Tacit patch) ─────
