@@ -1,7 +1,8 @@
 /**
  * Unit tests for the idle-to-lounge bench (Tacit patch): a character
- * continuously inactive past LOUNGE_IDLE_SEC is walked to a free tile inside
- * the Area named by OfficeState.loungeArea, frozen there (skipping the
+ * continuously inactive past LOUNGE_IDLE_SEC is walked into the Area named by
+ * OfficeState.loungeArea — onto a free sofa seat there if one is going, onto
+ * a free floor tile if every sofa is taken — frozen there (skipping the
  * ordinary inactive wander/seat-rest cycle) until reactivated, at which point
  * setAgentActive(id, true) sends it back to its own seat.
  *
@@ -54,6 +55,39 @@ function seatOffice(): { os: OfficeState; seatUid: string } {
     assigned: false,
   });
   return { os, seatUid };
+}
+
+/** As seatOffice(), but with a two-tile lounge — (4, 2) and (5, 2) — so a
+ *  sofa seat and open lounge floor can both exist. Built the same way the
+ *  stacking test above builds its own: widen the grid, label the extra tile. */
+function wideLoungeOffice(): { os: OfficeState; seatUid: string } {
+  const layout = loungeLayout(7, 4);
+  layout.areaTiles![2 * 7 + 5] = 'Lounge';
+  const os = new OfficeState(layout);
+  const seatUid = 'seat-1';
+  os.seats.set(seatUid, {
+    uid: seatUid,
+    seatCol: 3,
+    seatRow: 2,
+    facingDir: Direction.DOWN,
+    assigned: false,
+  });
+  return { os, seatUid };
+}
+
+/** Put an unassigned sofa seat on a lounge tile, the way layoutToSeats does
+ *  for any furniture in the `chairs` category. UP so the facing assertion
+ *  cannot pass by coincidence: a character parked without sitting keeps
+ *  whichever direction its last walk step left it in, never UP here. */
+function addSofa(os: OfficeState, uid: string, col: number, row: number): string {
+  os.seats.set(uid, {
+    uid,
+    seatCol: col,
+    seatRow: row,
+    facingDir: Direction.UP,
+    assigned: false,
+  });
+  return uid;
 }
 
 test('an agent inactive past LOUNGE_IDLE_SEC is pathed into the lounge Area', () => {
@@ -335,4 +369,133 @@ test('two characters crossing the threshold in the same frame do not stack on th
   const destOf = (ch: typeof a) =>
     ch.path.length > 0 ? ch.path[ch.path.length - 1] : { col: ch.tileCol, row: ch.tileRow };
   assert.notDeepEqual(destOf(a), destOf(b), 'must be heading to two different lounge tiles');
+});
+
+test('an idle character takes a free sofa in the lounge, and sits on it', () => {
+  // The lounge the layout builder draws is a coffee table ringed by sofas and
+  // it refuses to build one seating fewer than six. Before this patch the
+  // bench asked only for a free walkable TILE, so every benched character
+  // stood around the furniture and the sofas were decor.
+  const { os, seatUid } = seatOffice();
+  os.setLoungeArea('Lounge');
+  const sofa = addSofa(os, 'sofa-1', 4, 2);
+  os.addAgent(1, 0, 0, seatUid, true);
+  os.setAgentActive(1, false);
+
+  const ch = os.characters.get(1)!;
+  ch.inactiveSec = LOUNGE_IDLE_SEC;
+
+  os.update(1); // dispatch + walk
+  os.update(1); // arrival
+  os.update(1); // frozen tick: adopts the seated pose
+
+  assert.equal(ch.inLounge, true);
+  assert.equal(ch.loungeSeatId, sofa, 'took the sofa, not open floor');
+  assert.equal(ch.tileCol, 4, 'standing on the sofa tile');
+  assert.equal(ch.tileRow, 2);
+  assert.equal(ch.state, CharacterState.TYPE, 'seated pose — the engine has no separate sit state');
+  assert.equal(ch.dir, Direction.UP, "facing the sofa's own direction");
+  assert.equal(ch.seatId, seatUid, 'still owns its desk');
+});
+
+test('a second character takes a different sofa rather than stacking on the first', () => {
+  const { os, seatUid } = wideLoungeOffice();
+  os.setLoungeArea('Lounge');
+  os.seats.set('seat-2', {
+    uid: 'seat-2',
+    seatCol: 3,
+    seatRow: 1,
+    facingDir: Direction.DOWN,
+    assigned: false,
+  });
+  addSofa(os, 'sofa-1', 4, 2);
+  addSofa(os, 'sofa-2', 5, 2);
+  os.addAgent(1, 0, 0, seatUid, true);
+  os.addAgent(2, 0, 0, 'seat-2', true);
+  os.setAgentActive(1, false);
+  os.setAgentActive(2, false);
+
+  const a = os.characters.get(1)!;
+  const b = os.characters.get(2)!;
+  a.inactiveSec = LOUNGE_IDLE_SEC;
+  b.inactiveSec = LOUNGE_IDLE_SEC;
+
+  // Both cross the threshold inside the SAME update(), which is the frame the
+  // reservation exists for: without it both are pathed onto one sofa.
+  os.update(1);
+  os.update(1);
+  os.update(1);
+
+  assert.notEqual(a.loungeSeatId, null, 'first took a sofa');
+  assert.notEqual(b.loungeSeatId, null, 'second took a sofa');
+  assert.notEqual(a.loungeSeatId, b.loungeSeatId, 'and not the same one');
+  assert.notDeepEqual(
+    { col: a.tileCol, row: a.tileRow },
+    { col: b.tileCol, row: b.tileRow },
+    'so they do not stack',
+  );
+});
+
+test("a sofa that is some agent's assigned desk is never taken from under it", () => {
+  // A lounge sofa CAN be a home seat: the allocator falls back to "any free
+  // seat anywhere else" once a product room fills up. Benching another
+  // character onto it would leave its owner homeless.
+  const { os, seatUid } = wideLoungeOffice();
+  os.setLoungeArea('Lounge');
+  const sofa = addSofa(os, 'sofa-1', 4, 2);
+  os.seats.get(sofa)!.assigned = true; // somebody's desk
+  os.addAgent(1, 0, 0, seatUid, true);
+  os.setAgentActive(1, false);
+
+  const ch = os.characters.get(1)!;
+  ch.inactiveSec = LOUNGE_IDLE_SEC;
+
+  os.update(1);
+  os.update(1);
+  os.update(1);
+
+  assert.equal(ch.inLounge, true, 'still benched');
+  assert.equal(ch.loungeSeatId, null, 'on open floor, not on the assigned sofa');
+  assert.equal(ch.state, CharacterState.IDLE, 'standing, since it took no seat');
+});
+
+test('with every sofa taken, the bench falls back to open lounge floor', () => {
+  // The pre-patch behaviour, kept as the fallback: a lounge whose sofas are
+  // all spoken for still benches, it just parks on a tile.
+  const { os, seatUid } = wideLoungeOffice();
+  os.setLoungeArea('Lounge');
+  const sofa = addSofa(os, 'sofa-1', 4, 2);
+  os.seats.get(sofa)!.assigned = true;
+  os.addAgent(1, 0, 0, seatUid, true);
+  os.setAgentActive(1, false);
+
+  const ch = os.characters.get(1)!;
+  ch.inactiveSec = LOUNGE_IDLE_SEC;
+  os.update(1);
+  os.update(1);
+  os.update(1);
+
+  assert.equal(ch.inLounge, true, 'benched all the same');
+  assert.equal(ch.loungeSeatId, null, 'holding no sofa');
+  assert.equal(ch.tileRow, 2, 'inside the lounge');
+  assert.ok(ch.tileCol === 4 || ch.tileCol === 5, 'on one of the two lounge tiles');
+});
+
+test('reactivation releases the sofa for the next character to go idle', () => {
+  const { os, seatUid } = seatOffice();
+  os.setLoungeArea('Lounge');
+  const sofa = addSofa(os, 'sofa-1', 4, 2);
+  os.addAgent(1, 0, 0, seatUid, true);
+  os.setAgentActive(1, false);
+
+  const ch = os.characters.get(1)!;
+  ch.inactiveSec = LOUNGE_IDLE_SEC;
+  os.update(1);
+  os.update(1);
+  assert.equal(ch.loungeSeatId, sofa, 'sanity: holding the sofa');
+
+  os.setAgentActive(1, true);
+
+  assert.equal(ch.inLounge, false);
+  assert.equal(ch.loungeSeatId, null, 'reservation released on the way back to its desk');
 });

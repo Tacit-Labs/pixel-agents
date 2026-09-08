@@ -45,6 +45,7 @@ function makeChar(id: number, col: number, row: number): Character {
     seatTimer: 0,
     inactiveSec: 0,
     inLounge: false,
+    loungeSeatId: null,
     isSubagent: false,
     parentAgentId: null,
     matrixEffect: null,

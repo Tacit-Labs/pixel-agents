@@ -257,6 +257,43 @@ names this case in the server log. The `permissionSent` exemption is
 unchanged and now matters more: an unanswered ask still cannot be culled by
 any clock, only by its process going away.
 
+A thirteenth patch puts the benched characters on the furniture. The fourth
+patch walks an idle character into the lounge Area and the tenth made that
+immediate, but both asked `closestFreeAreaTile` for a free walkable TILE. The
+lounge `build-layout.mjs` draws is a coffee table ringed by four sofa pieces,
+and it fails the build outright rather than ship a lounge seating fewer than
+six — so the sofas were there all along, and a dozen benched characters stood
+around them. The furniture read as decor.
+
+Those sofa tiles are already seats: `layoutToSeats` makes a seat of every tile
+of every `chairs`-category item, sofas and cushioned benches included, and the
+lounge's are simply never assigned to an agent. `maybeSendToLounge` now asks
+`closestFreeLoungeSeat` first and only falls back to a tile, so the pre-patch
+behaviour is what a full lounge still does.
+
+Free means three things at once, and each has a failure behind it.
+**Unassigned**, because a lounge sofa can be somebody's home desk — the seat
+allocator falls back to "any free seat anywhere else" when a product room
+fills up — and benching another character onto it would leave its owner
+homeless. **Not already promised this frame**, held on `Character.
+loungeSeatId`, which is the same reservation the tile path makes for the same
+reason: a character mid-walk has not arrived, so two crossing the threshold in
+one `update()` would both compute the same nearest sofa. **Not stood on**, for
+the character that is already there.
+
+Sitting is `sitInLounge`, and it is `sendToSeat`'s arrival branch with a
+different seat: the engine has three character states and no sitting one, so a
+character at a desk is drawn `TYPE` facing `seat.facingDir`, and that is what
+reads as seated. It is applied on the first frozen frame after the walk ends,
+and re-asserted idempotently while the freeze holds.
+
+The reservation is released wherever the bench ends — `sendToSeat`,
+`walkToTile`, `setAgentActive(id, true)` — and, newly, in
+`rebuildFromLayout`, which is the one that would otherwise leak: it replaces
+`this.seats` wholesale and snaps every character back onto a desk, so a
+retained `loungeSeatId` would name a seat in the old map while holding a sofa
+in the new one against everyone who goes idle afterwards.
+
 ## Syncing upstream
 
     git fetch upstream --tags

@@ -81,6 +81,7 @@ export function createCharacter(
     seatTimer: 0,
     inactiveSec: 0,
     inLounge: false,
+    loungeSeatId: null,
     isSubagent: false,
     parentAgentId: null,
     matrixEffect: null,
