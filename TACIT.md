@@ -231,6 +231,32 @@ silently, and the first open that succeeds clears the mark and says so.
 logs every time. Nothing about the agent changes: hook events drive it
 either way, and the transcript never carried anything for it.
 
+A twelfth patch caps how long a character may sit in the lounge. The tenth
+patch gave a running process the last word — alive was never ghosted, however
+quiet — on the reading that a live process means a director is still in that
+session. On the Mini it means no such thing. The Claude desktop app holds one
+`claude-code` process per open conversation tab and Remote Control one per
+repo, both for as long as the box is up, so liveness only ever said that
+nothing had crashed. Sessions last touched two days ago sat solid on the
+sofas behind live pids, a dozen of them, which is the symptom the eighth
+patch's clock was written to cure arriving through the other door.
+
+`classifyIdle` now takes the liveness answer and picks between two pairs of
+clocks rather than skipping the bands entirely. A process the OS cannot vouch
+for keeps `IDLE_GHOST_MS` (1h) and `IDLE_CULL_MS` (12h). A process that is
+running gets `LIVE_IDLE_GHOST_MS` (10m) and `LIVE_IDLE_CULL_MS` (30m): a live
+pid buys a longer benefit of the doubt than silence alone, not a permanent
+one. A process the OS says is gone is still culled on the sweep that notices.
+
+The short clocks are affordable because a cull dismisses nothing: the very
+next hook event — a prompt, a tool call — brings the session back through
+`adoptLiveSession` at its own desk. Leaving is cheap and returning is free,
+so the lounge shows the last half hour of work rather than the last week of
+open windows. The cull reason `idle` is new beside `gone` and `silent`, and
+names this case in the server log. The `permissionSent` exemption is
+unchanged and now matters more: an unanswered ask still cannot be culled by
+any clock, only by its process going away.
+
 ## Syncing upstream
 
     git fetch upstream --tags

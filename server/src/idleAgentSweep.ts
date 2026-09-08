@@ -1,5 +1,11 @@
 import type { AgentStateStore } from './agentStateStore.js';
-import { IDLE_CULL_MS, IDLE_GHOST_MS, IDLE_SWEEP_INTERVAL_MS } from './constants.js';
+import {
+  IDLE_CULL_MS,
+  IDLE_GHOST_MS,
+  IDLE_SWEEP_INTERVAL_MS,
+  LIVE_IDLE_CULL_MS,
+  LIVE_IDLE_GHOST_MS,
+} from './constants.js';
 import { type LivenessMap, probeLiveness } from './processLiveness.js';
 import type { AgentState } from './types.js';
 
@@ -30,23 +36,39 @@ import type { AgentState } from './types.js';
  * exemptions below apply only to the cull: an agent that must not be removed
  * is still an agent nobody has heard from, and saying so costs nothing.
  *
- * Silence is only the fallback, though. An agent whose hook wrapper reported
- * its pid is judged by the OS instead (processLiveness.ts): a running Claude
- * process is 'live' however long it has been quiet, because a director who
- * left a session open at a prompt has not lost anything, and the lounge is
- * where that character belongs, drawn solid. A process that is gone is
- * culled on the sweep that notices, not twelve hours later. The two silence
- * thresholds still apply to any agent the OS cannot answer for.
+ * An agent whose hook wrapper reported its pid is judged with help from the
+ * OS (processLiveness.ts). A process that is gone is culled on the sweep that
+ * notices, not twelve hours later. A process that is still running does NOT
+ * buy the character an unlimited stay: it gets the same two-stage treatment
+ * on a much shorter pair of clocks (LIVE_IDLE_GHOST_MS, LIVE_IDLE_CULL_MS).
+ *
+ * That last part is the correction to the patch that introduced liveness,
+ * which read a running process as "the director is still in this session".
+ * On the Mini it is nothing of the kind: the Claude desktop app holds one
+ * process per open conversation tab and Remote Control one per repo, both for
+ * as long as the machine is up. Sessions untouched for two days sat solid in
+ * the lounge behind a live pid, and the lounge filled with them — the same
+ * symptom the clock was written to cure, arriving by the other door. What a
+ * live pid actually proves is that nothing crashed, so it buys a longer
+ * benefit of the doubt than silence alone, not a permanent one.
  */
 export type IdleVerdict = 'live' | 'ghost' | 'cull';
 
-/** Why an agent was culled: its process is gone, or nothing has been heard
- *  from it for IDLE_CULL_MS and it never reported a pid. */
-export type CullReason = 'gone' | 'silent';
+/** Why an agent was culled: its process is gone ('gone'), it has said
+ *  nothing for LIVE_IDLE_CULL_MS while its process kept running ('idle'), or
+ *  it never reported a pid and has been silent for IDLE_CULL_MS ('silent'). */
+export type CullReason = 'gone' | 'idle' | 'silent';
 
-export function classifyIdle(idleMs: number): IdleVerdict {
-  if (idleMs >= IDLE_CULL_MS) return 'cull';
-  if (idleMs >= IDLE_GHOST_MS) return 'ghost';
+/**
+ * Which band this much silence falls in, on whichever pair of clocks applies.
+ * `processAlive` picks the short pair: a running process is evidence nothing
+ * crashed, not evidence anyone is there.
+ */
+export function classifyIdle(idleMs: number, processAlive = false): IdleVerdict {
+  const cullAt = processAlive ? LIVE_IDLE_CULL_MS : IDLE_CULL_MS;
+  const ghostAt = processAlive ? LIVE_IDLE_GHOST_MS : IDLE_GHOST_MS;
+  if (idleMs >= cullAt) return 'cull';
+  if (idleMs >= ghostAt) return 'ghost';
   return 'live';
 }
 
@@ -100,7 +122,7 @@ export function sweepIdleAgents(
       toCull.push([id, 'gone']);
       continue;
     }
-    const verdict: IdleVerdict = known === 'alive' ? 'live' : classifyIdle(now - seen);
+    const verdict: IdleVerdict = classifyIdle(now - seen, known === 'alive');
 
     // Two agents are never culled, however long the silence runs.
     //
@@ -116,7 +138,7 @@ export function sweepIdleAgents(
     const cullExempt = agent.leadAgentId !== undefined || agent.permissionSent;
 
     if (verdict === 'cull' && !cullExempt) {
-      toCull.push([id, 'silent']);
+      toCull.push([id, known === 'alive' ? 'idle' : 'silent']);
       continue;
     }
 

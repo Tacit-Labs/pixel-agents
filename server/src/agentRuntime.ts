@@ -14,7 +14,7 @@ import * as path from 'path';
 
 import type { HookProvider } from '../../core/src/provider.js';
 import type { AgentStateStore } from './agentStateStore.js';
-import { DEFAULT_MAX_CONTEXT_TOKENS, IDLE_CULL_MS } from './constants.js';
+import { DEFAULT_MAX_CONTEXT_TOKENS, IDLE_CULL_MS, LIVE_IDLE_CULL_MS } from './constants.js';
 import { DismissalTracker } from './dismissalTracker.js';
 import {
   adoptExternalSessionFromHook,
@@ -453,8 +453,10 @@ export class AgentRuntime {
 
   /**
    * Start the idle sweep (Tacit patch): remove an external agent whose
-   * reported process is gone, and for one that reported no pid, ghost it at
-   * IDLE_GHOST_MS of silence and remove it at IDLE_CULL_MS. This is the only
+   * reported process is gone, ghost one whose process is running but which
+   * has said nothing for LIVE_IDLE_GHOST_MS and remove it at
+   * LIVE_IDLE_CULL_MS, and give one that reported no pid the longer pair
+   * (IDLE_GHOST_MS, IDLE_CULL_MS). This is the only
    * path that ends a session which died without emitting SessionEnd and left
    * its transcript behind — an ssh drop, a closed terminal, kill -9, a reboot
    * mid-turn — none of which the two evidence-driven paths can see.
@@ -480,7 +482,9 @@ export class AgentRuntime {
     const why =
       reason === 'gone'
         ? `process ${agent.pid} is gone`
-        : `nothing heard for ${IDLE_CULL_MS / 3_600_000}h`;
+        : reason === 'idle'
+          ? `nothing heard for ${LIVE_IDLE_CULL_MS / 60_000}m, process still up`
+          : `nothing heard for ${IDLE_CULL_MS / 3_600_000}h`;
     console.log(`[Pixel Agents] Idle sweep: removing agent ${id} (${why})`);
     this.removeTeammates(id);
     this.subagentWatch.removeByLead(id);
